@@ -11,13 +11,13 @@ from car_foundation.utils import quaternion_to_euler, generate_subsequences, gen
 import glob
 
 
-DATASET_NAME = "XXX"
+DATASET_NAME = "/disk1/collect_data_from_anycar/2024-11-12T14:49:38.560-nuplan-dynamic-model/"
 
 path = os.path.join(CAR_FOUNDATION_DATA_DIR, DATASET_NAME)
 filenumber = 0
 print(glob.glob(os.path.join(path, '*.pkl'))[filenumber])
 dataset = pickle.load(open(glob.glob(os.path.join(path, '*.pkl'))[filenumber], 'rb'))
-MujocoDataset(os.path.join(CAR_FOUNDATION_DATA_DIR, 'mujoco_sim_scale_1'), 50, 50, teacher_forcing=False)
+# MujocoDataset(os.path.join(CAR_FOUNDATION_DATA_DIR, 'mujoco_sim_scale_1'), 50, 50, teacher_forcing=False)
 throttle = dataset.data_logs["throttle"]
 steer = dataset.data_logs['steer']
 q = np.array([dataset.data_logs["xori_w"],
@@ -44,7 +44,7 @@ def filter(data, percentile=95):
 
 plt.figure()
 plt.plot(vx)
-plt.show()
+# plt.show()
 
 
 # visualize the 2D heatmap of the throttle and steer
@@ -57,7 +57,7 @@ plt.xlabel('Throttle')
 plt.ylabel('Steer')
 plt.title('Throttle and Steer Distribution')
 # plt.savefig('throttle_steer_distribution.png')
-plt.show()
+# plt.show()
 
 # plt.figure()
 # plt.hist(throttle.flatten(), bins=1000, color='red')
@@ -72,7 +72,7 @@ plt.xlabel('Vx')
 plt.ylabel('Vy')
 plt.title('Vx and Vy Distribution')
 # plt.savefig('vx_vy_distribution.png')
-plt.show()
+# plt.show()
 # plt.savefig('throttle_steer_distribution.png')
 
 # plt.show()

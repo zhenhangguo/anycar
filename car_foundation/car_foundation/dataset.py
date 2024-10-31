@@ -187,6 +187,7 @@ class MujocoDataset(Dataset):
                  attack=False,
                  filter=False,
                  add_noise=False,
+                 use_zero_point=False,
     ):
         self.attack = attack
         self.add_noise = add_noise
@@ -216,7 +217,10 @@ class MujocoDataset(Dataset):
                 np.zeros_like(mujoco_raw_dataset.data_logs["xpos_x"]),
                 ]).T
             episode_length = np.where(mujoco_raw_dataset.data_logs["lap_end"] == 1)[0][0] + 1
-            # print("EPISODE LENGTH", episode_length)
+
+            print("mujoco_raw_dataset.data_logs[xvel_y] = " + str(mujoco_raw_dataset.data_logs["xvel_y"]))
+
+            # print("EPISODE LENGTH", episode_length)            
             episode_terminations = np.arange(episode_length - 1, data_array.shape[0], episode_length)
             assert np.all(mujoco_raw_dataset.data_logs["lap_end"][episode_terminations] == 1), 'Episode terminations are not correct'
             data_array = data_array.reshape(-1, episode_length, data_array.shape[1])
@@ -240,6 +244,16 @@ class MujocoDataset(Dataset):
             # then reshape the data to have the sequence length as the third dimension
             episode_length = data_array.shape[1]
             data_array = data_array[:, :(episode_length - episode_length % self.sequence_length), :].reshape(-1, self.sequence_length, data_array.shape[2])
+
+            # use zero point as first point if need
+            if use_zero_point:
+                for idx in range(data_array.shape[0]):
+                    data = data_array[idx,:,:]
+                    if np.isclose(data[0,0], 0, atol=1) and np.isclose(data[0,1], 0, atol=1):
+                        continue
+                    else:
+                        first_column = data[0, :2]
+                        data[:, :2] -= first_column[np.newaxis, :]
 
             return torch.tensor(data_array)
 
@@ -294,13 +308,17 @@ class MujocoDataset(Dataset):
 
         # create a delta dataset
         self.delta_data = self.data.clone().detach()
-        self.delta_data[:, 1:, :3] = self.data[:, 1:, :3] - self.data[:, :-1, :3]
+        
+        #self.delta_data[:, 1:, :3] = self.data[:, 1:, :3] - self.data[:, :-1, :3]      #  x, y , yaw, is delta value 
+        # set x, y , yaw, vx, vy, yawrate all is delta value!!!! 
+        self.delta_data[:, 1:, :6] = self.data[:, 1:, :6] - self.data[:, :-1, :6]
+        
         self.delta_data[:, 1:, 2] = align_yaw(self.delta_data[:, 1:, 2], 0.0)
         original_yaw = self.data[:, :-1, 2]
         # transform to Body Frame
-        delta_x = self.delta_data[:, 1:, 0] * torch.cos(original_yaw) + self.delta_data[:, 1:, 1] * torch.sin(original_yaw)
-        delta_y = -self.delta_data[:, 1:, 0] * torch.sin(original_yaw) + self.delta_data[:, 1:, 1] * torch.cos(original_yaw)
-        
+        delta_x = self.delta_data[:, 1:, 0] * torch.cos(original_yaw) + self.delta_data[:, 1:, 1] * torch.sin(original_yaw)   # x transfor to vehicie body frame
+        delta_y = -self.delta_data[:, 1:, 0] * torch.sin(original_yaw) + self.delta_data[:, 1:, 1] * torch.cos(original_yaw)  # y transfor to vehicie body frame
+
         self.delta_data[:, 1:, 0] = delta_x
         self.delta_data[:, 1:, 1] = delta_y
         self.delta_data = self.delta_data.detach()
@@ -376,8 +394,23 @@ class MujocoDataset(Dataset):
     
     def __getitem__(self, idx):
         action_padding_mask = None if self.action_padding_mask is None else self.action_padding_mask[idx]
-        return self.history[idx], self.action[idx], self.y[idx], action_padding_mask, self.data[idx]
+        return self.history[idx], self.action[idx], self.y[idx], action_padding_mask #, self.data[idx]
     
     def get_episode(self, idx):
         return self.data[idx]
+
+    def get_total_data(self):
+        return self.data
     
+    def remove_episode(self, id_list):
+
+        mask = torch.ones(self.history.size(0), dtype=bool)
+        mask[id_list] = False
+        
+        self.data = self.data[mask]
+        self.history = self.history[mask]
+        self.action = self.action[mask]
+        self.y = self.y[mask]
+        self.action_padding_mask = self.action_padding_mask[mask]
+
+        self.len = len(self.data)

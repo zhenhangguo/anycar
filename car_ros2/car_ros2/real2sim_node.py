@@ -13,17 +13,17 @@ from ackermann_msgs.msg import AckermannDriveStamped
 
 from tf_transformations import quaternion_from_euler, euler_matrix, euler_from_quaternion
 
-from car_dynamics.models_jax import DynamicBicycleModel
-from car_dynamics.controllers_jax import MPPIController, rollout_fn_select
-from car_dynamics.controllers_jax import WaypointGenerator
-from car_dynamics.models_jax import ParamAdaptModel, AdaptDataset
+from models_jax import DynamicBicycleModel
+from controllers_jax import MPPIController, rollout_fn_select
+from controllers_jax import WaypointGenerator
+from models_jax import ParamAdaptModel, AdaptDataset
 import threading
 from datetime import datetime
 import numpy as np
 import jax
 import jax.numpy as jnp
 from multiprocessing.pool import ThreadPool
-from car_dynamics.models_torch import DynamicsTorch
+from models_torch import DynamicsTorch
 import matplotlib.pyplot as plt
 
 from car_ros2 import CAR_ROS2_TMP

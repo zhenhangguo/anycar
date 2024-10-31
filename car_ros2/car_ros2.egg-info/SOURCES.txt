@@ -8,6 +8,8 @@ car_ros2/bag_utils.py
 car_ros2/car_joystick_node.py
 car_ros2/car_node.py
 car_ros2/car_simulator_node.py
+car_ros2/car_slam_node.py
+car_ros2/car_vio_node.py
 car_ros2/real2sim_node.py
 car_ros2/utils.py
 car_ros2.egg-info/PKG-INFO
@@ -19,6 +21,7 @@ car_ros2.egg-info/top_level.txt
 car_ros2.egg-info/zip-safe
 launch/car_real.launch.py
 launch/car_sim.launch.py
+launch/car_sim_control_only.launch.py
 launch/car_sim_only.launch.py
 launch/real2sim_node.launch.py
 param/car_sim.param.yaml

@@ -14,8 +14,8 @@ import datetime
 from tqdm import tqdm
 from car_dataset import CarDataset
 
-from car_dynamics.envs.assetto_corsa.assetto_corsa_gym.AssettoCorsaEnv import assettoCorsa #capital C in assetto"C"orsa!!
-from car_dynamics.controllers_torch import AltPurePursuitController, RandWalkController
+from envs.assetto_corsa.assetto_corsa_gym.AssettoCorsaEnv import assettoCorsa #capital C in assetto"C"orsa!!
+from controllers_torch import AltPurePursuitController, RandWalkController
 
 import sys
 import pandas as pd
@@ -200,13 +200,13 @@ if __name__ == "__main__":
 
     num_success = 0
     start = time.time()
-    
+
     for i in range(episodes):
         ret = rollout(i, simend, debug_plots, data_dir)
         print(f"Episode {i} Complete")
         if ret:
             num_success += 1
-    
+
     dur = time.time() - start
     print(f"Success Rate: {num_success}/{episodes}")
-    print(f"Time Elapsed:, {dur}")   
+    print(f"Time Elapsed:, {dur}")

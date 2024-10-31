@@ -15,8 +15,8 @@ from tqdm import tqdm
 from car_dataset import CarDataset
 
 
-from car_dynamics.envs.assetto_corsa.assetto_corsa_gym.AssettoCorsaEnv import assettoCorsa #capital C in assetto"C"orsa!!
-from car_dynamics.controllers_torch import AltPurePursuitController, RandWalkController
+from envs.assetto_corsa.assetto_corsa_gym.AssettoCorsaEnv import assettoCorsa #capital C in assetto"C"orsa!!
+from controllers_torch import AltPurePursuitController, RandWalkController
 
 import sys
 import pandas as pd

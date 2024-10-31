@@ -6,7 +6,7 @@ import time
 from termcolor import colored
 from .base import BaseController
 from functools import partial
-from car_dynamics.models_jax import DynamicParams   
+from models_jax import DynamicParams   
 import flax
 from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
 
@@ -37,7 +37,7 @@ class MPPIParams:
     dual: bool = False
 
 @flax.struct.dataclass
-class MPPIRunningParams:
+class  :
     a_mean: jnp.ndarray
     a_cov: jnp.ndarray  
     prev_a: jnp.ndarray
@@ -64,7 +64,7 @@ class MPPIController(BaseController):
         self.rollout_fn = rollout_fn
         self.rollout_start_fn = rollout_start_fn
         self._init_buffers()
-        
+
         if params.dynamics == 'dbm':
             self.scan_fn = jax.lax.scan
             self._get_rollout = self._get_rollout_dbm
@@ -73,8 +73,8 @@ class MPPIController(BaseController):
             self._get_rollout = self._get_rollout_nn
         else:
             raise ValueError(f"Unknown dynamics model: {params.dynamics}")
-        
-        
+
+
     def _init_buffers(self, ):
         self.spline_order = self.params.spline_order
         self.H = (self.params.h_knot -1 ) * self.params.num_intermediate + 1 
@@ -227,7 +227,7 @@ class MPPIController(BaseController):
         state_list = jnp.concatenate((state_list, state_list2), axis=0)
         state_list_jnp = jnp.array(state_list)
         return state_list_jnp
-    
+
 
     
     @partial(jax.jit, static_argnums=(0,))
@@ -339,6 +339,7 @@ class MPPIController(BaseController):
         goal_list, 
         running_params: MPPIRunningParams,
         dynamic_params_tuple,
+        #vis_optim_traj,
     ):
         """
         Execute the Model Predictive Path Integral (MPPI) control algorithm.

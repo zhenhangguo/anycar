@@ -2,7 +2,7 @@ import numpy as np
 from car_planner.track_generation import change_track
 import matplotlib.pyplot as plt
 import os
-from car_dynamics.envs import make_env, CarEnvParams
+from envs import make_env, CarEnvParams
 from car_dataset import CarDataset
 from car_planner import CAR_PLANNER_ASSETS_DIR
 from car_planner.global_trajectory import GlobalTrajectory, generate_circle_trajectory, generate_oval_trajectory, generate_rectangle_trajectory, generate_raceline_trajectory
@@ -11,8 +11,8 @@ import datetime
 from car_foundation import CAR_FOUNDATION_DATA_DIR
 import pickle
 from car_ros2.utils import load_mppi_params, load_dynamic_params
-from car_dynamics.controllers_jax import MPPIController, rollout_fn_jax, MPPIRunningParams
-from car_dynamics.models_jax import DynamicsJax
+from controllers_jax import MPPIController, rollout_fn_jax, MPPIRunningParams
+from models_jax import DynamicsJax
 from termcolor import colored
 import jax
 import time
@@ -34,7 +34,7 @@ from car_foundation.utils import generate_subsequences, generate_subsequences_hf
 from functools import partial
 from rich.progress import track
 import ray
-from car_planner.track_generation_realistic import change_track
+from car_planner.track_generation import change_track
 
 
 # DEBUG = False
@@ -54,6 +54,7 @@ data_folder_path = os.path.join(CAR_FOUNDATION_DATA_DIR, f'{data_folder_prefix}-
 cache_folder_path = os.path.join(NUMERIC_COLLECT_TMP_DIR, f'{data_folder_prefix}-on-policy-cache')
 def fn():
     ...
+    
     
 
 # Load pretrained model
@@ -82,7 +83,7 @@ num_train_epochs = 50
 load_checkpoint = True
 resume_model_checkpint = 400
 # resume_model_name = "2024-07-15T17:56:55.014-model_checkpoint"
-resume_model_name = "2024-07-17T23:58:15.976-model_checkpoint"
+resume_model_name = "anycar_model_checkpoint"
 # resume_model_name = "2024-07-17T22:47:11.861-model_checkpoint"
 resume_model_folder_path = os.path.join(CAR_FOUNDATION_MODEL_DIR, resume_model_name, f"{resume_model_checkpint}", "default")
 val_every = 20
@@ -109,20 +110,20 @@ std = jnp.array([0.01598073, 0.00196785, 0.01215522, 0.7989133,  0.09668902, 0.6
 
 # @ray.remote
 def rollout(pickle_i, tmp_dir, mppi, key_i):
-    
+
     track_direction = np.random.choice([-1, 1])
     reference_track = change_track(scale=1, direction=track_direction)
     global_planner = GlobalTrajectory(reference_track)
 
     env.reset() 
-    
+
     mkdir_if_not_exist(tmp_dir)
-    
+
 
     mppi_running_params = mppi.get_init_params()
-    
+
     key_i, key2 = jax.random.split(key_i)
-    
+
     mppi_running_params = MPPIRunningParams(
         a_mean = mppi_running_params.a_mean,
         a_cov = mppi_running_params.a_cov,
@@ -137,9 +138,9 @@ def rollout(pickle_i, tmp_dir, mppi, key_i):
         
         if t == 0:
             for _ in range(history_length):
-                mppi_running_params = mppi.feed_hist(mppi_running_params, state, np.array([0., 0.]))
-        
-        
+                mppi_running_params = mppi.feed_hist(mppi_running_params, state, np.array([0., 0.]))   #init mppi state
+
+
         target_pos_arr, frenet_pose = global_planner.generate(state[:5], env.sim.params.DT, (mppi_params.h_knot - 1) * mppi_params.num_intermediate + 2 + mppi_params.delay, True)
         target_pos_list = np.array(target_pos_arr)
         target_pos_tensor = jnp.array(target_pos_arr)
@@ -152,12 +153,12 @@ def rollout(pickle_i, tmp_dir, mppi, key_i):
         # print("DEBUG HIST", mppi_info['history'][-1])
 
         log_data_minimal(dataset, env, action)
-        
+
         obs, reward, done, info = env.step(np.array(action))
-        
+
         mppi_running_params = mppi.feed_hist(mppi_running_params, state, action)
         real_trajectory.append(obs[:2])
-        
+
     plt.figure()
     plt.plot(np.array(real_trajectory)[:, 0], np.array(real_trajectory)[:, 1], label='real', marker='o', markersize=3)
     plt.plot(np.array(reference_track)[:, 0], np.array(reference_track)[:, 1], label='reference')
@@ -204,7 +205,7 @@ for setting_i in range(num_settings):
     # dataset.car_params['wheelbase'] = 0.31
     dataset.car_params["com"] = np.random.uniform(0.3, 0.7)
     # dataset.car_params["com"] = 0.48
-    
+
     env_param = CarEnvParams(
         name='car-numeric-2d',
         mass=dataset.car_params["mass"],
@@ -217,13 +218,13 @@ for setting_i in range(num_settings):
         wheelbase = dataset.car_params['wheelbase'],
         com=dataset.car_params['com'],
     )
-    
+
     env = make_env(env_param)
-    
+
     for track_i in range(num_tracks):
-        
+
         for epoch_i in range(num_epochs):
-            
+
             ## Load mppi model
             mppi_params = load_mppi_params()
             model_params = load_dynamic_params()
@@ -231,31 +232,32 @@ for setting_i in range(num_settings):
             print(colored("Loaded transformer model", "green"))
             print(colored(type(dynamics), "blue"))
             rollout_fn = rollout_fn_jax(dynamics)
-            
+
             jax_key, key2 = jax.random.split(jax_key)
-            
+
             mppi = MPPIController(
                 mppi_params, rollout_fn, fn, key2
             )
-            
+
             # collect on policy data
             data_dir = os.path.join(data_folder_path, f"setting-{setting_i}-track-{track_i}-epoch-{epoch_i}")
-            
+
             if not os.path.exists(data_dir):
                 os.makedirs(data_dir)
-            
-            
+
+
             tmp_dir = os.path.join(cache_folder_path, f"setting-{setting_i}-track-{track_i}-epoch-{epoch_i}")
-            
+
             ## Need to parallelize this
             ret = []
             for pickle_i in range(num_pickle_files):
                 jax_key, key2 = jax.random.split(jax_key)
                 ret.append(rollout(pickle_i, tmp_dir, mppi, key2))
             # output = ray.get(ret)
-                
-            
+
+
             ## -------------------- train model ---------------------------
+            print(colored("train model", "red"))
             if not update_model:
                 continue
             
@@ -341,7 +343,8 @@ for setting_i in range(num_settings):
 
             if load_checkpoint:
                 restored = checkpoint_manager.restore(resume_model_folder_path_parent)
-                global_var['params'] = restored['params']
+                global_var['params'] = restored.get('params', global_var['params'])
+                print("global_var.keys() = "+str(global_var.keys()))
                 global_state = train_state.TrainState.create(
                         apply_fn=model.apply, params=global_var[PARAMS_KEY], tx=tx
                     )
@@ -355,7 +358,7 @@ for setting_i in range(num_settings):
                 # tgt_mask = nn.Transformer.generate_square_subsequent_mask(action.size(1), device=action.device)
                 y_pred = model.apply(var_collect, x, action, action_padding_mask=action_padding_mask, rngs=rngs, deterministic=True) * std + mean
 
-                last_pose = last_state[:, :3]
+                last_pose = last_state[:, :6]
                 for i in range(y_pred.shape[1]):
                     # rotate dx, dy back to world frame
                     y_pred_x = y_pred[:, i, 0] * jnp.cos(last_pose[:, 2]) - y_pred[:, i, 1] * jnp.sin(last_pose[:, 2])
@@ -363,9 +366,9 @@ for setting_i in range(num_settings):
                     y_pred = y_pred.at[:, i, 0].set(y_pred_x)
                     y_pred = y_pred.at[:, i, 1].set(y_pred_y)
                     # accumulate the poses
-                    y_pred = y_pred.at[:, i, :3].add(last_pose)
+                    y_pred = y_pred.at[:, i, :6].add(last_pose)
                     y_pred = y_pred.at[:, i, 2].set(align_yaw_jax(y_pred[:, i, 2], 0.0))
-                    last_pose = y_pred[:, i, :3]
+                    last_pose = y_pred[:, i, :6]
                 return y_pred
 
             @partial(jax.jit, static_argnums=(7,))

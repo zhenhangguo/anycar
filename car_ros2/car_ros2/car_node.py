@@ -18,11 +18,11 @@ from sensor_msgs.msg import Joy
 from tf_transformations import quaternion_from_euler, euler_matrix, euler_from_quaternion
 
 from car_planner import CAR_PLANNER_ASSETS_DIR
-from car_dynamics.models_jax import DynamicBicycleModel
-from car_dynamics.controllers_jax import MPPIController, rollout_fn_select, MPPIRunningParams, void_fn
-from car_dynamics.controllers_torch import PurePersuitParams, PurePersuitController
+from models_jax import DynamicBicycleModel
+from controllers_jax import MPPIController, rollout_fn_select, MPPIRunningParams, void_fn
+from controllers_torch import PurePersuitParams, PurePersuitController
 from car_planner.global_trajectory import GlobalTrajectory, generate_circle_trajectory, generate_oval_trajectory, generate_rectangle_trajectory, generate_raceline_trajectory
-from car_dynamics.models_jax import DynamicsJax
+from models_jax import DynamicsJax
 from car_foundation import CAR_FOUNDATION_MODEL_DIR
 import numpy as np
 import jax
@@ -33,13 +33,13 @@ import datetime
 
 print("DEVICE", jax.devices())
 
-from car_ros2.utils import load_dynamic_params, load_mppi_params, load_env_params_mujoco, load_env_params_numeric, load_env_params_isaacsim, load_env_params_unity
+from car_ros2.utils import load_dynamic_params, load_mppi_params, load_env_params_mujoco, load_env_params_numeric, load_env_params_isaacsim, load_env_params_unity, load_dynamic_params_correct, load_dynamic_params_uncorrect
 
 import threading
 from multiprocessing.pool import ThreadPool
 
 
-from car_dynamics.models_jax.dbm import CarState, CarAction
+from models_jax.dbm import CarState, CarAction
 
 unique_prefix = datetime.datetime.now().isoformat(timespec='milliseconds')
 
@@ -62,9 +62,11 @@ class CarNode(Node):
     def __init__(self):
         super().__init__('car_node')
         
-        # print("Car node start")
+        print("Car node start")
         self.env_params = load_env_params_numeric()
         self.model_params = load_dynamic_params()
+        # self.model_params = load_dynamic_params_correct()
+        # self.model_params = load_dynamic_params_uncorrect()
         self.mppi_params = load_mppi_params()
 
         # NOTE: Can choose either 'mppi' or 'pure_persuit'
@@ -82,7 +84,7 @@ class CarNode(Node):
                 self.dynamics.reset()
                 self.rollout_fn = rollout_fn_select('dbm', self.dynamics, self.model_params.DT, self.L, self.model_params.LR)
             elif DYNAMICS == "transformer-torch":
-                from car_dynamics.models_torch.nn_dynamics import DynamicsTorch
+                from models_torch.nn_dynamics import DynamicsTorch
                 ## Load Transformer
                 self.dynamics = DynamicsTorch({DynamicsJax({'model_path':os.path.join(CAR_FOUNDATION_MODEL_DIR, "2024-07-15T17:56:55.014-model_checkpoint", f"{400}", "default")})})
                 # self.dynamics = DynamicsJax({})
@@ -92,6 +94,7 @@ class CarNode(Node):
                 ## Load Transformer
                 self.dynamics = DynamicsJax({
                     "model_path": os.path.join(CAR_FOUNDATION_MODEL_DIR, "anycar_model_checkpoint/500/default"), # pt
+                    # "model_path": os.path.join(CAR_FOUNDATION_MODEL_DIR, "2024-11-07-model_checkpoint/400/default"), # pt
                 })
                 print(colored("Loaded JAX transformer model", "green"))
                 print(colored(type(self.dynamics), "blue"))
@@ -105,12 +108,12 @@ class CarNode(Node):
             self.mppi = MPPIController(
                 self.mppi_params, self.rollout_fn, void_fn, key
             )
-            
+
             self.mppi_running_params = self.mppi.get_init_params()
-            
+
             self.key, key2 = jax.random.split(self.key)
-            
-            
+
+
             self.mppi_running_params = MPPIRunningParams(
                 a_mean = self.mppi_running_params.a_mean,
                 a_cov = self.mppi_running_params.a_cov,
@@ -118,7 +121,7 @@ class CarNode(Node):
                 state_hist = self.mppi_running_params.state_hist,
                 key = key2,
             )
-            
+
             ## Define the warmup MPPI Based on DBM model
             self.mppi_params_warmup = load_mppi_params()
             self.mppi_params_warmup.dynamics = 'dbm'
@@ -135,8 +138,8 @@ class CarNode(Node):
                 prev_a = self.mppi_running_params_warmup.prev_a,
                 state_hist = self.mppi_running_params_warmup.state_hist,
                 key = key2,
-            )         
-        elif self.controller_type == 'pure_persuit':        
+            )
+        elif self.controller_type == 'pure_persuit':
             ## Pure pursuit controller
             pure_persuit_params = PurePersuitParams()
             if 'numeric' in self.env_params.name or \
@@ -148,7 +151,7 @@ class CarNode(Node):
                 pure_persuit_params.wheelbase = 0.2
                 pure_persuit_params.kp = 3.
             self.pure_pursuit = PurePersuitController(pure_persuit_params)
-            
+
         pure_persuit_params = PurePersuitParams()
         if 'numeric' in self.env_params.name or \
                 'mujoco' in self.env_params.name or\
@@ -168,7 +171,7 @@ class CarNode(Node):
         # track = np.loadtxt(os.path.join(CAR_PLANNER_ASSETS_DIR, "math_park_v2.txt"), delimiter=',', skiprows=1)
         # track = generate_oval_trajectory((0., -20.0), 20.0, 20.0, direction=-1)
         track = np.loadtxt(os.path.join(CAR_PLANNER_ASSETS_DIR, "cuc_inside.csv"), delimiter=',', skiprows=1)
-        
+
         self.global_planner = GlobalTrajectory(track)
         self.step_mode_ = self.declare_parameter('step_mode', False).value
         ## ROS2 publishers and subscribers
@@ -198,7 +201,7 @@ class CarNode(Node):
         self.odom = None
         self.prev_action = np.zeros(2)
         self.debug_buffer = dict(timestamp=[], obs=[], action=[], action_canidate=[], sampled_traj=[])
-        
+
         self.params_pub_list = []
         for param in self.model_params.to_dict().keys():
             self.params_pub_list.append(self.create_publisher(Float64, f"param/{param}", 1))
@@ -211,12 +214,11 @@ class CarNode(Node):
             listener = keyboard.Listener(on_press=self.on_press_key)
             listener.start()
 
-
         if not self.step_mode_:
             timer_thread = threading.Thread(target=self.timer_thread_fn)
             timer_thread.start()
-        
-        
+
+
     def on_press_key(self, key):
         # print(key, type(key), dir(key), key.char)
         if hasattr(key, 'char') and key.char == 'r':
@@ -226,26 +228,26 @@ class CarNode(Node):
             self.emergency_stop = not self.emergency_stop
             if self.emergency_stop:
                 print(colored(f"[INFO] Emergency stop", "red"))
-        
-        
+
+
     def timer_thread_fn(self):
         while True:
             self.timer_callback()
-        
+
     def timer_callback(self):
-        
+
         start_time = self.get_clock().now()
         # print("here")
         if self.odom is None:
             print("ODOM NOT FOUND!")
             # time.sleep(self.model_params.DT)
             return
-        
+
         if TELEOP and self.joy is None:
             print("TELEOP NOT FOUND!")
             return
-    
-        
+
+
         odom_copy = deepcopy(self.odom)
 
         rpy = euler_from_quaternion([
@@ -254,19 +256,19 @@ class CarNode(Node):
             self.odom.pose.pose.orientation.z,
             self.odom.pose.pose.orientation.w,
         ])
-        
+
         pose_car = np.array([
             self.odom.pose.pose.position.x,
             self.odom.pose.pose.position.y,
             self.odom.pose.pose.position.z,
         ], dtype=np.float32)
-        
+
         lin_vel_car = np.array([
             self.odom.twist.twist.linear.x,
             self.odom.twist.twist.linear.y,
             self.odom.twist.twist.linear.z,
         ], dtype=np.float32)
-        
+
         quat_car = np.array([
             self.odom.pose.pose.orientation.w,
             self.odom.pose.pose.orientation.x,
@@ -302,10 +304,10 @@ class CarNode(Node):
             target_pos_tensor = jnp.array(target_pos_arr)
             dynamic_params_tuple = (self.model_params.LF, self.model_params.LR, self.model_params.MASS, self.model_params.DT, self.model_params.K_RFY, self.model_params.K_FFY, self.model_params.Iz, self.model_params.Ta, self.model_params.Tb, self.model_params.Sa, self.model_params.Sb, self.model_params.mu, self.model_params.Cf, self.model_params.Cr, self.model_params.Bf, self.model_params.Br, self.model_params.hcom, self.model_params.fr)
             
-            if self.mppi_params.dual and self._counter % 1 == 0:
+            if self.mppi_params.dual and self._counter % 1 == 0:   # dual and update params every frame ?? 
                 # DUAL MPPI AS WARMUP
                 self.mppi_running_params_warmup = MPPIRunningParams(
-                    a_mean = self.mppi_running_params.a_mean,
+                    a_mean = self.mppi_running_params.a_mean,      # ??? wrong ??????
                     a_cov = self.mppi_running_params_warmup.a_cov,
                     prev_a = self.mppi_running_params_warmup.prev_a,
                     state_hist = self.mppi_running_params_warmup.state_hist,
@@ -481,7 +483,7 @@ class CarNode(Node):
         misc_msg = String()
         misc_msg.data = f"env: {self.env_params.name}\ncontroller: {controller_type}\nEnv:\n- mass:{self.env_params.mass}\n- friction:{self.env_params.friction}\n- delay:{self.env_params.delay}\n- step:{self._counter}\n"
         self.misc_pub_.publish(misc_msg)
-            
+
         #publish mppi time
         mppi_time_msg = Float64()
         mppi_time_msg.data = duration_sec

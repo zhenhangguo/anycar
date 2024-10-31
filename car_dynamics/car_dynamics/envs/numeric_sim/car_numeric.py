@@ -2,7 +2,7 @@ from copy import deepcopy
 import gym
 from gym import spaces
 import numpy as np
-from car_dynamics.models_jax import DynamicBicycleModel, CarState, CarAction
+from models_jax import DynamicBicycleModel, CarState, CarAction
 from termcolor import colored
 from scipy.spatial.transform import Rotation as R
 

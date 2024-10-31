@@ -32,8 +32,8 @@ from car_foundation.jax_models import JaxTransformerDecoder, JaxMLP, JaxCNN, Jax
 from car_foundation.train_utils import create_learning_rate_fn, loss_fn, val_episode, val_loop, visualize_episode
 # new imports
 # from car_ros2.utils import load_dynamic_params, load_mppi_params, load_env_params_mujoco, load_env_params_numeric, load_env_params_isaacsim, load_env_params_unity, load_env_params_assettocorsa
-# from car_dynamics.models_jax import TuneDynamicsJax
-# from car_dynamics.controllers_jax import MPPIController, rollout_fn_select, MPPIRunningParams, void_fn
+# from models_jax import TuneDynamicsJax
+# from controllers_jax import MPPIController, rollout_fn_select, MPPIRunningParams, void_fn
 
 import sys
 import datetime

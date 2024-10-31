@@ -2,17 +2,33 @@ import argparse
 from functools import partial
 from typing import Sequence
 
+import os
 import flax
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+from typing import Any, Callable, Dict, Tuple, Sequence, Union, Iterable, Optional
+from enum import Enum
+
 # from datasets import load_dataset
 from flax import linen as nn
+from flax.linen import partitioning as nn_partitioning
 from flax.training import train_state
 
-import transformer_engine.jax as te
+from jax.interpreters import pxla
+from jax.sharding import PartitionSpec
+from jax import lax, vmap
+from flax.linen.attention import combine_masks
+from jax.ad_checkpoint import checkpoint_name
+from jax import random as jax_random
+from reprlib import recursive_repr
+
 import transformer_engine.jax.flax as te_flax
+
+#from .transformormer_engine_code import *
+
+#import transformer_engine.jax.flax as te_flax
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -51,9 +67,9 @@ class JaxTransformerEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, history, action, history_padding_mask=None, action_padding_mask=None, tgt_mask=None, deterministic=False):
-        action_encoder = te_flax.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_action')
+        action_encoder = nn.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_action')
         history_emb = jnp.zeros((history.shape[0], history.shape[1] * 2 - 1, self.latent_dim), dtype=self.dtype)
-        history_emb = history_emb.at[:, ::2].set(te_flax.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_state')(history[:, :, :self.state_dim])) # shape: [batch_size, seq_length, latent_dim]
+        history_emb = history_emb.at[:, ::2].set(nn.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_state')(history[:, :, :self.state_dim])) # shape: [batch_size, seq_length, latent_dim]
         history_emb = history_emb.at[:, 1::2].set(action_encoder(history[:, :-1, self.state_dim:self.state_dim+self.action_dim])) # shape: [batch_size, seq_length-1, latent_dim]
         
         history_emb = JaxLearnedPositionalEncoding(self.latent_dim, self.history_length * 2 - 1, self.dropout_rate, flip=True, dtype=self.dtype)(history_emb, deterministic=deterministic)
@@ -73,7 +89,7 @@ class JaxTransformerEncoder(nn.Module):
                 intermediate_dropout=self.dropout_rate,
                 dropout_rng_name='dropout',
                 mlp_activations=('gelu',),
-                layer_type=te_flax.TransformerLayerType.ENCODER,
+                layer_type=TransformerLayerType.ENCODER,
                 self_attn_mask_type="causal",
                 enable_relative_embedding=False,
                 dtype=self.dtype,
@@ -81,7 +97,7 @@ class JaxTransformerEncoder(nn.Module):
             )
             decoder_output = te_Decoder()(inputs=decoder_output, attention_mask=None, encoder_decoder_mask=tgt_mask, encoded=history_emb, deterministic=deterministic)
 
-        output = te_flax.DenseGeneral(self.output_dim, dtype=self.dtype, name='linear_output')(decoder_output)
+        output = nn.DenseGeneral(self.output_dim, dtype=self.dtype, name='linear_output')(decoder_output)
         return output
     
      
@@ -100,9 +116,9 @@ class JaxTransformerDecoder(nn.Module):
 
     @nn.compact
     def __call__(self, history, action, history_padding_mask=None, action_padding_mask=None, tgt_mask=None, deterministic=False):
-        action_encoder = te_flax.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_action')
+        action_encoder = nn.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_action')
         history_emb = jnp.zeros((history.shape[0], history.shape[1] * 2 - 1, self.latent_dim), dtype=self.dtype)
-        history_emb = history_emb.at[:, ::2].set(te_flax.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_state')(history[:, :, :self.state_dim])) # shape: [batch_size, seq_length, latent_dim]
+        history_emb = history_emb.at[:, ::2].set(nn.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_state')(history[:, :, :self.state_dim])) # shape: [batch_size, seq_length, latent_dim]
         history_emb = history_emb.at[:, 1::2].set(action_encoder(history[:, :-1, self.state_dim:self.state_dim+self.action_dim])) # shape: [batch_size, seq_length-1, latent_dim]
         
         history_emb = JaxLearnedPositionalEncoding(self.latent_dim, self.history_length * 2 - 1, self.dropout_rate, flip=True, dtype=self.dtype)(history_emb, deterministic=deterministic)
@@ -130,7 +146,7 @@ class JaxTransformerDecoder(nn.Module):
             )
             decoder_output = te_Decoder()(inputs=decoder_output, attention_mask=None, encoder_decoder_mask=tgt_mask, encoded=history_emb, deterministic=deterministic)
 
-        output = te_flax.DenseGeneral(self.output_dim, dtype=self.dtype, name='linear_output')(decoder_output)
+        output = nn.DenseGeneral(self.output_dim, dtype=self.dtype, name='linear_output')(decoder_output)
         return output
     
 class JaxTransformerDecoderVis(nn.Module):
@@ -148,9 +164,9 @@ class JaxTransformerDecoderVis(nn.Module):
 
     @nn.compact
     def __call__(self, history, action, history_padding_mask=None, action_padding_mask=None, tgt_mask=None, deterministic=False):
-        action_encoder = te_flax.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_action')
+        action_encoder = nn.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_action')
         history_emb = jnp.zeros((history.shape[0], history.shape[1] * 2 - 1, self.latent_dim), dtype=self.dtype)
-        history_emb = history_emb.at[:, ::2].set(te_flax.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_state')(history[:, :, :self.state_dim])) # shape: [batch_size, seq_length, latent_dim]
+        history_emb = history_emb.at[:, ::2].set(nn.DenseGeneral(self.latent_dim, dtype=self.dtype, name='linear_input_state')(history[:, :, :self.state_dim])) # shape: [batch_size, seq_length, latent_dim]
         history_emb = history_emb.at[:, 1::2].set(action_encoder(history[:, :-1, self.state_dim:self.state_dim+self.action_dim])) # shape: [batch_size, seq_length-1, latent_dim]
         
         history_emb = JaxLearnedPositionalEncoding(self.latent_dim, self.history_length * 2 - 1, self.dropout_rate, flip=True, dtype=self.dtype)(history_emb, deterministic=deterministic)
@@ -181,8 +197,7 @@ class JaxTransformerDecoderVis(nn.Module):
             all_attention_weights.append(attn_weights)
         mean_attention_weights = jnp.mean(jnp.stack(all_attention_weights), axis=0)
 
-
-        output = te_flax.DenseGeneral(self.output_dim, dtype=self.dtype, name='linear_output')(decoder_output)
+        output = nn.DenseGeneral(self.output_dim, dtype=self.dtype, name='linear_output')(decoder_output)
         return output, mean_attention_weights
     
 class JaxMLP(nn.Module):
@@ -294,88 +309,4 @@ class JaxLSTM(nn.Module):
         x = nn.Dense(self.output_dim)(x)
         
         return x
-    
-
-# class JaxLSTM(nn.Module):
-#     hidden_size: int
-#     output_dim: int
-#     num_layers: int
-#     dropout_rate: float
-
-#     @nn.compact
-#     def __call__(self, history, action, history_padding_mask=None, action_padding_mask=None, tgt_mask=None, deterministic=False):
-#         bs = history.shape[0]
-        
-#         actions = action
-
-#         x = history.reshape(bs, -1)
-
-#         # Initialize LSTM layers
-#         lstm_cells = [nn.LSTMCell(features=self.hidden_size, name=f'lstm_layer_{i}') for i in range(self.num_layers)]
-        
-#         # Initialize hidden state (h_t) and cell state (c_t) to history
-#         # hidden_state = nn.Dense(self.hidden_size)(x)
-#         # hidden_state = nn.relu(hidden_state)
-
-#         # cell_state = nn.Dense(self.hidden_size)(x)
-#         # cell_state = nn.relu(cell_state)
-        
-#         # Apply LSTM layers iteratively
-#         for lstm_cell in lstm_cells:
-#             outputs = []
-#             carry = lstm_cell.initialize_carry(jax.random.PRNGKey(0), (action.shape[0],))
-#             for t in range(actions.shape[1]):
-#                 # carry = (hidden_state, cell_state)
-#                 carry = lstm_cell(carry, actions[:, t, :])
-#                 hidden_state, cell_state = carry
-#                 outputs.append(hidden_state)  # Only append the hidden state (h_t)
-
-#             x = jnp.stack(outputs, axis=1)  # Stack the outputs along the time dimension
-
-#             # Apply dropout after each LSTM layer (optional)
-#             x = nn.Dropout(rate=self.dropout_rate, deterministic=deterministic)(x)
-
-#         x = x.reshape((bs, -1))
-
-#         x = nn.Dense(self.output_dim * action.shape[1])(x)
-        
-#         return x.reshape((x.shape[0], -1, self.output_dim))
-
-# class JaxGRU(nn.Module):
-#     hidden_size: int
-#     output_dim: int
-#     num_layers: int
-#     dropout_rate: float
-
-#     @nn.compact
-#     def __call__(self, history, action, history_padding_mask=None, action_padding_mask=None, tgt_mask=None, deterministic=False):
-#         bs = history.shape[0]
-        
-#         actions = action
-
-#         x = history.reshape(bs, -1)
-
-#         # Initialize GRU layers
-#         gru_cells = [nn.GRUCell(features = self.hidden_size, name=f'gru_layer_{i}') for i in range(self.num_layers)]
-        
-#         # Initialize hidden state to zeros
-#         hidden_state = nn.Dense(self.hidden_size)(x)
-#         hidden_state = nn.relu(hidden_state)
-
-#         # Apply GRU layers iteratively
-#         for gru_cell in gru_cells:
-#             outputs = []
-#             for t in range(actions.shape[1]):
-#                 hidden_state, output = gru_cell(hidden_state, actions[:, t, :])
-#                 outputs.append(output)
-#             x = jnp.stack(outputs, axis=1)  # Stack the outputs along the time dimension
-
-#             # Apply dropout after each GRU layer (optional)
-#             x = nn.Dropout(rate=self.dropout_rate, deterministic=deterministic)(x)
-
-#         x = x.reshape((bs, -1))
-
-#         x = nn.Dense(self.output_dim * action.shape[1])(x)
-        
-#         return x.reshape((x.shape[0], -1, self.output_dim))
     

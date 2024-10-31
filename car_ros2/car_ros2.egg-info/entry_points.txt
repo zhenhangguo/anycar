@@ -2,4 +2,6 @@
 car_joystick_node = car_ros2.car_joystick_node:main
 car_node = car_ros2.car_node:main
 car_simulator_node = car_ros2.car_simulator_node:main
+car_slam_node = car_ros2.car_slam_node:main
+car_vio_node = car_ros2.car_vio_node:main
 real2sim_node = car_ros2.real2sim_node:main

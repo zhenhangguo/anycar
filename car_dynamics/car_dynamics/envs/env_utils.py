@@ -14,14 +14,14 @@ class CarEnvParams:
     steer_bias: float
     wheelbase: float
     com: Union[float, List[float]]
-    
+
 
 def make_env(params: CarEnvParams):
-    
+
     if params.name == 'car-numeric-2d':
-        from car_dynamics.envs.numeric_sim import Car2D
-        from car_dynamics.models_jax import DynamicBicycleModel, DynamicParams
-        
+        from envs.numeric_sim import Car2D
+        from models_jax import DynamicBicycleModel, DynamicParams
+
         dynamic_param = DynamicParams(
             num_envs = 1,
             MASS = params.mass,
@@ -31,6 +31,7 @@ def make_env(params: CarEnvParams):
             Sb = params.steer_bias,
             LF = params.wheelbase * params.com,
             LR = params.wheelbase * (1 - params.com),
+            ## temp test different model
         )
         dynamics = DynamicBicycleModel(dynamic_param)
         dynamics.reset()

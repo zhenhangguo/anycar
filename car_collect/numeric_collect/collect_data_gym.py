@@ -5,9 +5,9 @@ import pickle
 import datetime
 import numpy as np
 from car_dataset import CarDataset
-from car_dynamics.envs import make_env, CarEnvParams
-from car_dynamics.envs.numeric_sim.car_numeric import Car2D
-from car_dynamics.controllers_torch import AltPurePursuitController, RandWalkController
+from envs import make_env, CarEnvParams
+from envs.numeric_sim.car_numeric import Car2D
+from controllers_torch import AltPurePursuitController, RandWalkController
 # from car_planner.track_generation_realistic import change_track
 from car_planner.track_generation import change_track
 from car_planner.global_trajectory import generate_oval_trajectory
@@ -237,9 +237,10 @@ def rollout(params):
 if __name__ == "__main__":
     
     simend = 2000
-    episodes = 1
+    episodes = 10000
 
-    data_dir = os.path.join(CAR_FOUNDATION_DATA_DIR, f'{data_folder_prefix}-numeric_sim')
+    # data_dir = os.path.join(CAR_FOUNDATION_DATA_DIR, f'{data_folder_prefix}-numeric_sim')
+    data_dir = os.path.join('/disk1/collect_data_from_anycar', f'{data_folder_prefix}-numeric_sim')
 
     os.makedirs(data_dir, exist_ok=True)
     

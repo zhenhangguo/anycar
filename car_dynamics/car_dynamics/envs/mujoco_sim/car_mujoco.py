@@ -5,7 +5,7 @@ from gym import spaces
 import numpy as np
 
 from termcolor import colored
-from car_dynamics.envs.mujoco_sim import World
+from envs.mujoco_sim import World
 from scipy.spatial.transform import Rotation as R
 
 class MuJoCoCar(gym.Env):

@@ -54,7 +54,7 @@ class DynamicsJax:
         param_count = sum(x.size for x in jax.tree_leaves(raw_restored['model']['params']))
         # print(f"model structu: {raw_restored['model']}")
         print(f"Number of parameters: {param_count}")
-        # import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace() 
         
         # self.var['params'] = raw_restored['params']
         # self.input_mean = jnp.array([3.3083595e-02, 1.4826456e-04, 1.8982769e-03, 1.6544139e+00, 5.5305376e-03, 9.5738873e-02])
@@ -66,8 +66,7 @@ class DynamicsJax:
         
         print("input_mean", self.input_mean)
         print("input_std", self.input_std)
-        
-        
+
     @partial(jax.jit, static_argnums=(0,))
     def step(self, key, history: jax.Array, state: jax.Array, action: jax.Array):
         st_nn_dyn = time.time()

@@ -49,31 +49,33 @@ teacher_forcing = False
 
 FINE_TUNE = False
 ATTACK = False
-USE_ZERO_POINT= True
 
 Run_first = True
+USE_ZERO_POINT = True
 
 if FINE_TUNE:
-    lr_begin = 5e-4
+    lr_begin = 5e-5
     warmup_period = 2
     num_epochs = 400
     load_checkpoint = True
-    resume_model_checkpint = 200
-    resume_model_name = "2025-01-15T10:59:30.973-model_checkpoint"
+    resume_model_checkpint = 400
+    resume_model_name = "2024-11-13T15:35:28.617-model_checkpoint"
 else:
     lr_begin = 5e-4
     warmup_period = 500
-    num_epochs = 400
+    num_epochs = 20
     load_checkpoint = False
     resume_model_checkpint = 0
     resume_model_name = ""
 
 val_every = 20
-batch_size = 512 #1024
+batch_size = 1024
 lambda_l2 = 1e-4
 #dataset_path = 'DATASET-PATH'
-dataset_path = '/disk1/collect_data_from_anycar/New_demo/total_data_1'
+# dataset_path = '/disk1/collect_data_from_anycar/check_data/temp_check_data_quantity'
+dataset_path = '/disk1/collect_data_from_anycar/2025-01-20T19:37:02.392-nuplan-dynamic-model'
 check_data_path = '/disk1/collect_data_from_anycar/New_demo/check_data'
+
 comment = 'jax'
 
 
@@ -83,9 +85,9 @@ num_workers = 6
 
 state_dim = 6
 action_dim = 2
-latent_dim = 256 #128 #64
+latent_dim = 64
 num_heads = 4
-num_layers = 3 #2
+num_layers = 2
 dropout = 0.1
 
 save_model_folder_prefix = datetime.datetime.now().isoformat(timespec='milliseconds')
@@ -116,12 +118,12 @@ data_70 = dataset_files[:split_70]
 data_20 = dataset_files[split_70:split_20]
 data_10 = dataset_files[split_20:]
 
-train_dataset = MujocoDataset(data_70, history_length, prediction_length, delays=delays, teacher_forcing=teacher_forcing, binary_mask=binary_mask,attack=ATTACK, use_zero_point=USE_ZERO_POINT)
+train_dataset = MujocoDataset(data_70, history_length, prediction_length, delays=delays, teacher_forcing=teacher_forcing, binary_mask=binary_mask,attack=ATTACK)
 # import ipdb; ipdb.set_trace()
 print("train data length", len(train_dataset))
 
-val_dataset = MujocoDataset(data_20, history_length, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK, use_zero_point=USE_ZERO_POINT)
-test_dataset = MujocoDataset(data_10, history_length, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK, use_zero_point=USE_ZERO_POINT)
+val_dataset = MujocoDataset(data_20, history_length, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK)
+test_dataset = MujocoDataset(data_10, history_length, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK)
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
@@ -213,23 +215,23 @@ else:
     input_mean = jnp.array(train_dataset.mean, dtype=jnp.float32)
     input_std = jnp.array(train_dataset.std, dtype=jnp.float32)
 
-print("mean: ", input_mean.tolist())
-print("std: ", input_std.tolist())
-
 
 def apply_batch(var_collect, last_state, history, action, y, action_padding_mask, rngs):
     history = history.at[:, :, :6].set((history[:, :, :6] - input_mean) / input_std)
     y = y.at[:, :, :6].set((y[:, :, :6] - input_mean) / input_std)
     
     global Run_first
-    if Run_first == True:
-        print("mean: ", input_mean.tolist())
-        print("std: ", input_std.tolist())
+    if Run_first:
+        print("input_mean = " + str(input_mean))
+        print("input_std = " + str(input_std))
         Run_first = False
 
     x = history[:, 1:, :]
     # tgt_mask = nn.Transformer.generate_square_subsequent_mask(action.size(1), device=action.device)
     y_pred = model.apply(var_collect, x, action, action_padding_mask=action_padding_mask, rngs=rngs, deterministic=True) * input_std + input_mean
+
+    # print("y_pred before = " + str(y_pred))
+
     last_pose = last_state[:, :6]
     for i in range(y_pred.shape[1]):
         # rotate dx, dy back to world frame
@@ -241,6 +243,8 @@ def apply_batch(var_collect, last_state, history, action, y, action_padding_mask
         y_pred = y_pred.at[:, i, :6].add(last_pose)
         y_pred = y_pred.at[:, i, 2].set(align_yaw_jax(y_pred[:, i, 2], 0.0))
         last_pose = y_pred[:, i, :6]
+    
+    # print("y_pred before = " + str(y_pred))
     return y_pred
 
 @partial(jax.jit, static_argnums=(7,))
@@ -253,30 +257,38 @@ def loss_fn(state, var_collect, history, action, y, action_padding_mask, rngs, d
 
     y_pred = state.apply_fn(var_collect, history, action, history_padding_mask=None, action_padding_mask=action_padding_mask, rngs=rngs, deterministic=deterministic)
     action_padding_mask_binary = (action_padding_mask == 0)[:, :, None]
-    # loss_weight = (torch.arange(1, y_pred.shape[1] + 1, device=device, dtype=torch.float32) / y_pred.shape[1])[None, :, None]
     
-    # add different state weights
-    state_weights = jnp.array([0.5, 0.5, 2.0, 0.5, 0.0, 2.5])  # 每个状态的权重, X, Y, yaw, Vx, Vy, yawrate
-    state_weights = state_weights[None, None, :]  # 调整形状为 (1, 1, 6)
-    loss = jnp.mean(((y_pred - y) ** 2) * action_padding_mask_binary * state_weights)
-    
-    # add different weight for time step
-    # time_loss_weight = (torch.arange(5, 1, -4 / y_pred.shape[1],dtype=torch.float32))[None, :] 
-    # time_loss_weight = time_loss_weight / time_loss_weight.mean()
-    
-    # full_weights = torch.ones(y.shape[1], y.shape[2], dtype=torch.float32)[None, :, : ]
-    # full_weights[:,:,0] = time_loss_weight
-    # full_weights[:,:,1] = time_loss_weight
-    # full_weights[:,:,2] = time_loss_weight
-    # full_weights[:,:,3] = time_loss_weight
-    # full_weights = jnp.array(full_weights.numpy())
-    
-    # loss = jnp.mean(((y_pred - y) ** 2) * action_padding_mask_binary * full_weights)
+    full_weights = torch.ones(y.shape[1], y.shape[2], dtype=torch.float32)[None, :, : ]
 
-    # loss = jnp.mean(((y_pred - y) ** 2) * action_padding_mask_binary)
+    time_loss_weight = (torch.arange(5, 1, -4 / y_pred.shape[1],dtype=torch.float32))[None, :] 
+    time_loss_weight = time_loss_weight / time_loss_weight.mean()
+    
+    full_weights[:,:,0] = time_loss_weight
+    full_weights[:,:,1] = time_loss_weight
+    full_weights[:,:,2] = time_loss_weight
+    full_weights[:,:,3] = time_loss_weight
+    
+    full_weights = jnp.array(full_weights.numpy())
+    
+    # state_weights = jnp.array([0.1, 0.1, 0.2, 0.1, 0.1, 0.4])  # 每个状态的权重
+    # state_weights = state_weights[None, None, :]  # 调整形状为 (1, 1, 6)
+    
+    # loss = jnp.mean(((y_pred - y) ** 2) * action_padding_mask_binary * state_weights)
+
+    # a = y_pred.block_until_ready()
+    # b = y.block_until_ready()
+
+    # c = jax.device_get(a)
+    # d = jax.device_get(b)
+
+    # print("y_pred = " + str(c))
+    # print("y = " + str(d))
+    
+    loss = jnp.mean(((y_pred - y) ** 2) * action_padding_mask_binary * full_weights)
+
     # diff = (y_pred - y) * loss_weight
     # loss = torch.mean(torch.masked_select(diff, action_padding_mask_binary) ** 2)
-    
+
     return loss
 
 
@@ -291,7 +303,6 @@ def val_episode(var_collect, episode_num, rngs, dateset):
     action_padding_mask = jnp.array(action_padding_mask.numpy())
     predicted_states = apply_batch(var_collect, batch[:, history_length-1, :], history, action, y, action_padding_mask, rngs)
     return np.array(predicted_states)
-    
 
 def val_loop(state, var_collect, val_loader, rngs):
     val_loss = 0.0
@@ -301,6 +312,7 @@ def val_loop(state, var_collect, val_loader, rngs):
         action = jnp.array(action.numpy())
         y = jnp.array(y.numpy())
         action_padding_mask = jnp.array(action_padding_mask.numpy())
+
         val_loss += loss_fn(state, var_collect, history, action, y, action_padding_mask, global_rngs, True).item()
         t_val.set_description(f'Validation Loss: {(val_loss / (i + 1)):.4f}')
         t_val.refresh()
@@ -363,12 +375,32 @@ def compute_vertor_rmse(tensor1_x, tensor1_y, tensor2_x, tensor2_y):
     rmse = torch.sqrt(mse).item()
     return rmse
 
+def calculate_dataset_md5(dataset):
+    """
+    计算 PyTorch Dataset 的 MD5 值
+    参数:
+    - dataset: torch.utils.data.Dataset 对象
+    返回:
+    - MD5 值
+    """
+    hash_md5 = hashlib.md5()
+
+    for data in DataLoader(dataset, batch_size=1, shuffle=False):  # 保证数据顺序一致
+        serialized_data = str(data).encode("utf-8")  # 将数据转为字符串再编码
+        hash_md5.update(serialized_data)
+
+    return hash_md5.hexdigest()
+
+
 def temp_use_verify_data():
-    dataset_path = check_data_path  #10 pkl
-    fig_result_path = '/home/gzh/anycar/model_test_result_fig'
+    dataset_path = check_data_path
+    fig_result_path = '/home/gzh/Desktop/anycar/anycar/model_test_result_fig'
     dataset_files = glob.glob(os.path.join(dataset_path, '*.pkl')) # get all *.pkl file in this path
-    test_dataset = MujocoDataset(dataset_files, history_length, prediction_length, delays=None, teacher_forcing=False, binary_mask=False,attack=False, use_zero_point=USE_ZERO_POINT)
+    test_dataset = MujocoDataset(dataset_files, history_length, prediction_length, delays=delays, teacher_forcing=teacher_forcing, binary_mask=binary_mask,attack=ATTACK, use_zero_point=USE_ZERO_POINT)
     data_num = len(test_dataset)
+    
+    # dataset_md5 = calculate_dataset_md5(test_dataset)
+    # print("dataset_md5 = "  + str(dataset_md5))
 
     global input_mean
     global input_std
@@ -378,7 +410,7 @@ def temp_use_verify_data():
     rmse_dict = {
         "position_error":[],
         "v_error":[],
-        "yawrate_error":[]
+        "yaw_error":[]
     }
 
     clear_directory(fig_result_path + "/")
@@ -400,9 +432,6 @@ def temp_use_verify_data():
 
     for epoch in range(data_num):
 
-        if epoch + 1 >= len(test_dataset):
-            continue
-
         predicted_states = val_episode(val_collect, epoch + 1, global_rngs, test_dataset)
         episode = test_dataset.get_episode(epoch + 1)
 
@@ -413,7 +442,7 @@ def temp_use_verify_data():
 
         rmse_dict["position_error"].append(position_error_rmse)
         rmse_dict["v_error"].append(v_error_rmse)
-        rmse_dict["yawrate_error"].append(yaw_error_rmse)
+        rmse_dict["yaw_error"].append(yaw_error_rmse)
 
         fig, axs = plt.subplots(2, 2, figsize=(10, 10))
         axs[0, 0].plot(episode[:, 0], episode[:, 1], label='Ground Truth', marker='o', markersize=5)
@@ -428,12 +457,12 @@ def temp_use_verify_data():
         axs[0, 1].plot(predict_x, predicted_states[0, :, 4], label='Predicted vy')
         axs[0, 1].legend()
 
-        axs[1, 0].plot(episode[:, 2] * 57.3, label='Ground Truth yaw(deg)')
-        axs[1, 0].plot(predict_x, predicted_states[0, :, 2] * 57.3, label='Predicted yaw(deg)')
-        axs[1, 0].legend()
+        labels = ['posi_err', 'v_err', 'yaw_err']
+        rmse_data = [position_error_rmse, v_error_rmse, yaw_error_rmse]
+        axs[1,0].bar(labels, rmse_data)
 
-        axs[1, 1].plot(episode[:, 5] * 57.3, label='Ground Truth yawrate(deg)')
-        axs[1, 1].plot(predict_x, predicted_states[0, :, 5] * 57.3, label='Predicted yawrate(deg)')
+        axs[1, 1].plot(episode[:, 5], label='Ground Truth v_yaw')
+        axs[1, 1].plot(predict_x, predicted_states[0, :, 5], label='Predicted v_yaw')
         axs[1, 1].legend()
 
         fig.tight_layout()
@@ -444,19 +473,21 @@ def temp_use_verify_data():
 
     fig, axs = plt.subplots(4, 1, figsize=(12, 18))
 
-    axs[0].scatter(range(len(rmse_dict["position_error"])), rmse_dict["position_error"], marker='o')
+    axs[0].scatter(range(data_num), rmse_dict["position_error"], marker='o')
     axs[0].set_title("position_error rmse")
 
-    axs[1].scatter(range(len(rmse_dict["position_error"])), rmse_dict["v_error"], marker='o')
+    axs[1].scatter(range(data_num), rmse_dict["v_error"], marker='o')
     axs[1].set_title("v_error rmse")
 
-    axs[2].scatter(range(len(rmse_dict["position_error"])), rmse_dict["yawrate_error"], marker='o')
-    axs[2].set_title("yawrate_error rmse")
+    axs[2].scatter(range(data_num), rmse_dict["yaw_error"], marker='o')
+    axs[2].set_title("yaw_error rmse")
+    
+    print("len(rmse_dict[yaw_error]) = " + str(len(rmse_dict["yaw_error"])))
 
-    mean_rmse = [np.mean(rmse_dict["position_error"]),np.mean(rmse_dict["v_error"]),np.mean(rmse_dict["yawrate_error"])]
+    mean_rmse = [np.mean(rmse_dict["position_error"]),np.mean(rmse_dict["v_error"]),np.mean(rmse_dict["yaw_error"])]
     print("position_error = " + str(np.mean(rmse_dict["position_error"])))
     print("v_error = " + str(np.mean(rmse_dict["v_error"])))
-    print("yawrate_error = " + str(np.mean(rmse_dict["yawrate_error"])))
+    print("yaw_error = " + str(np.mean(rmse_dict["yaw_error"])))
 
     axs[3].barh(list(rmse_dict.keys()), mean_rmse, color='skyblue')
     axs[3].set_title("mean RMSE fron all verify data")
@@ -495,6 +526,9 @@ for epoch in range(num_epochs):
 
         global_state = global_state.apply_gradients(grads=grads["params"])
         global_var['params'] = global_state.params
+    
+    # print("Terminating program for debug")
+    # sys.exit(0) 
 
     running_loss /= len(train_loader)
     train_losses.append(running_loss)

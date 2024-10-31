@@ -5,11 +5,11 @@ from car_foundation import CAR_FOUNDATION_MODEL_DIR
 from car_foundation import CAR_FOUNDATION_DATA_DIR
 from isaacsim_collect import ISAACSIM_COLLECT_TMP_DIR
 from car_planner.track_generation import change_track
-from car_dynamics.controllers_torch import AltPurePursuitController, RandWalkController
+from controllers_torch import AltPurePursuitController, RandWalkController
 from car_planner.global_trajectory import GlobalTrajectory, generate_circle_trajectory, generate_oval_trajectory, generate_rectangle_trajectory, generate_raceline_trajectory
-from car_dynamics.controllers_jax import MPPIController, rollout_fn_jax, MPPIRunningParams
+from controllers_jax import MPPIController, rollout_fn_jax, MPPIRunningParams
 from car_ros2.utils import load_mppi_params, load_dynamic_params
-from car_dynamics.models_jax import DynamicsJax
+from models_jax import DynamicsJax
 from termcolor import colored
 import numpy as np
 import jax

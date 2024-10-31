@@ -5,17 +5,17 @@ import pickle
 from scipy.spatial.transform import Rotation as R
 from scipy.interpolate import splprep, splev
 import matplotlib.pyplot as plt
-from car_dynamics.envs.isaac_sim.car_isaac import IsaacCar
+from envs.isaac_sim.car_isaac import IsaacCar
 from car_dataset import CarDataset
-from car_dynamics.controllers_torch import AltPurePursuitController, RandWalkController
+from controllers_torch import AltPurePursuitController, RandWalkController
 from car_planner.global_trajectory import GlobalTrajectory, generate_circle_trajectory, generate_oval_trajectory, generate_rectangle_trajectory, generate_raceline_trajectory
 from car_planner.track_generation import change_track
 import time
 import datetime
 from tqdm import tqdm
 from car_ros2.utils import load_mppi_params, load_dynamic_params
-from car_dynamics.controllers_jax import MPPIController, rollout_fn_jax, MPPIRunningParams
-from car_dynamics.models_jax import DynamicsJax
+from controllers_jax import MPPIController, rollout_fn_jax, MPPIRunningParams
+from models_jax import DynamicsJax
 from car_foundation import CAR_FOUNDATION_MODEL_DIR
 import jax
 from isaacsim_collect import ISAACSIM_COLLECT_TMP_DIR

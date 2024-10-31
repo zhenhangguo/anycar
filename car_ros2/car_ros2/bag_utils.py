@@ -11,7 +11,7 @@ from tf_transformations import euler_from_quaternion
 def read_messages(input_bag: str):
     reader = rosbag2_py.SequentialReader()
     reader.open(
-        rosbag2_py.StorageOptions(uri=input_bag, storage_id="mcap"),
+        rosbag2_py.StorageOptions(uri=input_bag, storage_id="sqlite3"),
         rosbag2_py.ConverterOptions(
             input_serialization_format="cdr", output_serialization_format="cdr"
         ),
@@ -49,7 +49,7 @@ def read_messages(input_bag: str):
             msg = deserialize_message(data, msg_type)
         yield topic, msg, timestamp
     del reader
-    
+
 class BagReader:
     def __init__(self, bag_path, full_state=False):
         self.full_state = full_state # whether include orientation in state

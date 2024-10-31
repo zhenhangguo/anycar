@@ -1,6 +1,6 @@
 
 import numpy as np
-from car_dynamics.controllers_torch import BaseController
+from controllers_torch import BaseController
 
 
 class PIDController( BaseController ):

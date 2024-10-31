@@ -1,6 +1,6 @@
 import os
 from car_dataset import CarDataset
-from car_dynamics.envs.numeric_sim.car_numeric import Car2D
+from envs.numeric_sim.car_numeric import Car2D
 
 def mkdir_if_not_exist(path):
         if not os.path.exists(path):

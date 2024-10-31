@@ -1,7 +1,7 @@
 import jax
 import numpy as np
 import jax.numpy as jnp
-from car_dynamics.models_jax.utils import normalize_angle_tensor, fold_angle_tensor
+from models_jax.utils import normalize_angle_tensor, fold_angle_tensor
 
 
 #----------------- reward functions -----------------#

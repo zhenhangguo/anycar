@@ -148,7 +148,7 @@ def apply_batch(var_collect,
     y_pred = y_pred * input_std + input_mean
     print(x.shape)
     print(attn_weights.shape)
-    last_pose = last_state[:, :3]
+    last_pose = last_state[:, :6]
     for i in range(y_pred.shape[1]):
         # rotate dx, dy back to world frame
         y_pred_x = y_pred[:, i, 0] * jnp.cos(last_pose[:, 2]) - y_pred[:, i, 1] * jnp.sin(last_pose[:, 2])
@@ -156,9 +156,9 @@ def apply_batch(var_collect,
         y_pred = y_pred.at[:, i, 0].set(y_pred_x)
         y_pred = y_pred.at[:, i, 1].set(y_pred_y)
         # accumulate the poses
-        y_pred = y_pred.at[:, i, :3].add(last_pose)
+        y_pred = y_pred.at[:, i, :6].add(last_pose)
         y_pred = y_pred.at[:, i, 2].set(align_yaw_jax(y_pred[:, i, 2], 0.0))
-        last_pose = y_pred[:, i, :3]
+        last_pose = y_pred[:, i, :6]
     return y_pred
 
 

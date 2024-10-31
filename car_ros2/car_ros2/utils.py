@@ -1,8 +1,8 @@
 # import rclpy
 from datetime import datetime, timedelta
-from car_dynamics.models_jax import DynamicParams
-from car_dynamics.controllers_jax import MPPIParams
-from car_dynamics.envs import CarEnvParams
+from models_jax import DynamicParams
+from controllers_jax import MPPIParams
+from envs import CarEnvParams
 from typing import Union, List
 
 def load_env_params_numeric() -> CarEnvParams:
@@ -17,7 +17,20 @@ def load_env_params_numeric() -> CarEnvParams:
         steer_bias=0.025,
         wheelbase=0.21,
         com=0.48,
-        
+    )
+
+def load_uncorrect_env_params_numeric() -> CarEnvParams:
+    return CarEnvParams(
+        mass = 4.,
+        friction=0.4,
+        name = 'car-numeric-2d',
+        render = False,
+        delay=0,
+        max_throttle=8.,
+        max_steer=0.36,
+        steer_bias=0.025,
+        wheelbase=0.21,
+        com=0.48,
     )
     
 def load_env_params_mujoco() -> CarEnvParams:
@@ -68,6 +81,22 @@ def load_env_params_unity() -> CarEnvParams:
         com=0.,
     )
 
+def load_dynamic_params_correct() -> DynamicParams:
+    # params same to "load_env_params_numeric()"
+    num_envs = 1
+    LF = 0.1008
+    LR = 0.1092
+    DT = 0.02
+    Sa = 0.36
+    Sb = 0.025
+    Ta = 4.0
+    mu = 0.8
+    MASS = 4.0
+    return DynamicParams(
+        num_envs=num_envs, LF=LF, LR=LR, DT=DT, Sa=Sa, Sb=Sb, Ta=Ta, mu=mu, MASS=MASS
+    )
+ 
+
 def load_dynamic_params() -> DynamicParams:
     num_envs = 200
     LF = 0.12
@@ -82,7 +111,21 @@ def load_dynamic_params() -> DynamicParams:
     return DynamicParams(
         num_envs=num_envs, LF=LF, LR=LR, DT=DT, Sa=Sa, Sb=Sb, Ta=Ta, Tb=Tb, mu=mu, MASS=MASS
     )
-    
+
+def load_dynamic_params_uncorrect() -> DynamicParams:
+    num_envs = 1
+    LF = 0.1008
+    LR = 0.1092
+    DT = 0.02
+    Sa = 0.36
+    Sb = 0.025
+    Ta = 4.0
+    mu = 0.8 * 0.5
+    MASS = 4.0
+    Cf = 1.0
+    return DynamicParams(
+        num_envs=num_envs, LF=LF, LR=LR, DT=DT, Sa=Sa, Sb=Sb, Ta=Ta, mu=mu, MASS=MASS
+    )
 
 def load_mppi_params() -> MPPIParams:
     

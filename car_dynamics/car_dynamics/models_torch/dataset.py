@@ -6,7 +6,7 @@ import scipy
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
-from car_dynamics.analysis import pos2vel_savgol, calc_delta_v
+from analysis import pos2vel_savgol, calc_delta_v
 
 
 class DynDataset(Dataset):

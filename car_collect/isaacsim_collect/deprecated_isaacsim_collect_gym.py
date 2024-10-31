@@ -5,9 +5,9 @@ import pickle
 from scipy.spatial.transform import Rotation as R
 from scipy.interpolate import splprep, splev
 import matplotlib.pyplot as plt
-from car_dynamics.envs.isaac_sim.car_isaac import IsaacCar
+from envs.isaac_sim.car_isaac import IsaacCar
 from car_dataset import CarDataset
-from car_dynamics.controllers_torch import AltPurePursuitController, RandWalkController
+from controllers_torch import AltPurePursuitController, RandWalkController
 from car_planner.track_generation import change_track
 import time
 import datetime

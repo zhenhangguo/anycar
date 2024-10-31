@@ -11,14 +11,14 @@ import time
 import math
 import datetime
 from tqdm import tqdm
-from car_dynamics.envs.mujoco_sim.cam_utils import *
+from envs.mujoco_sim.cam_utils import *
 from car_dataset import CarDataset
 from car_planner.track_generation import change_track
 # from car_planner.track_generation_realistic import change_track
 from car_dynamics import MUJOCO_MODEL_DIR
 
-from car_dynamics.envs.mujoco_sim.car_mujoco import MuJoCoCar
-from car_dynamics.controllers_torch import AltPurePursuitController, RandWalkController
+from envs.mujoco_sim.car_mujoco import MuJoCoCar
+from controllers_torch import AltPurePursuitController, RandWalkController
 
 import faulthandler
 faulthandler.enable()

@@ -10,3 +10,4 @@ scikit-learn
 wandb
 transformers
 pytorch-warmup
+orbax-checkpoint==0.5.15

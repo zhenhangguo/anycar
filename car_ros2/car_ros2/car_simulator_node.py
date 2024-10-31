@@ -8,9 +8,9 @@ from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster
 # import tf_transformations
 
-from car_ros2.utils import load_env_params_mujoco, load_env_params_numeric, load_env_params_isaacsim, load_env_params_unity
-from car_dynamics.models_jax import DynamicBicycleModel
-from car_dynamics.envs import make_env
+from car_ros2.utils import load_env_params_mujoco, load_env_params_numeric, load_env_params_isaacsim, load_env_params_unity, load_uncorrect_env_params_numeric
+from models_jax import DynamicBicycleModel
+from envs import make_env
 import tf_transformations
 
 
@@ -30,12 +30,12 @@ class CarSimulatorNode(Node):
         super().__init__("car_simulator_node")
         print("LAUNCHING SIMUALTION NODE")
         self.env_params = load_env_params_numeric()
+        # self.env_params = load_uncorrect_env_params_numeric()
 
         self.env = make_env(self.env_params)
-        
+
         self.initialized = False
 
-        
         if CORRECT_SLAM:
             self.odom_slam_pub = self.create_publisher(Odometry, "odom", 1)
             self.odom_slam_pub = self.create_publisher(PoseWithCovarianceStamped, "haoru_pose", 1)
@@ -46,8 +46,15 @@ class CarSimulatorNode(Node):
             AckermannDriveStamped, "ackermann_command", self.vehicle_cmd_callback, 1
         )
         self.tf_broadcaster = TransformBroadcaster(self)
+        self.fixed_duration = 100
+        self.start_time = self.get_clock().now()
 
     def timer_callback(self):
+
+        current_time = self.get_clock().now()
+        if (current_time - self.start_time).nanoseconds / 1e9 > self.fixed_duration:
+            rclpy.shutdown()
+
         if not self.initialized:
             obs = self.env.reset()
             px, py, psi, vx, vy, omega = self.env.obs_state().tolist()

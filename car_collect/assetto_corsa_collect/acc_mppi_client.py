@@ -3,14 +3,14 @@ import pickle
 import os
 from car_foundation import CAR_FOUNDATION_MODEL_DIR
 from car_planner.track_generation import change_track
-from car_dynamics.models_jax import DynamicBicycleModel
-from car_dynamics.controllers_jax import MPPIController, rollout_fn_select, MPPIRunningParams, void_fn
+from models_jax import DynamicBicycleModel
+from controllers_jax import MPPIController, rollout_fn_select, MPPIRunningParams, void_fn
 from car_planner.global_trajectory import GlobalTrajectory, generate_circle_trajectory, generate_oval_trajectory, generate_rectangle_trajectory, generate_raceline_trajectory
-from car_dynamics.controllers_jax import MPPIController, rollout_fn_jax, MPPIRunningParams
+from controllers_jax import MPPIController, rollout_fn_jax, MPPIRunningParams
 from car_ros2.utils import load_mppi_params, load_dynamic_params
-from car_dynamics.controllers_torch import PurePersuitParams, PurePersuitController, AltPurePursuitController
+from controllers_torch import PurePersuitParams, PurePersuitController, AltPurePursuitController
 from scipy.spatial.transform import Rotation as R
-from car_dynamics.models_jax import DynamicsJax
+from models_jax import DynamicsJax
 from termcolor import colored
 import numpy as np
 import jax
