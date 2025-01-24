@@ -218,7 +218,7 @@ class MujocoDataset(Dataset):
                 ]).T
             episode_length = np.where(mujoco_raw_dataset.data_logs["lap_end"] == 1)[0][0] + 1
 
-            print("mujoco_raw_dataset.data_logs[xvel_y] = " + str(mujoco_raw_dataset.data_logs["xvel_y"]))
+            # print("mujoco_raw_dataset.data_logs[xvel_y] = " + str(mujoco_raw_dataset.data_logs["xvel_y"]))
 
             # print("EPISODE LENGTH", episode_length)            
             episode_terminations = np.arange(episode_length - 1, data_array.shape[0], episode_length)

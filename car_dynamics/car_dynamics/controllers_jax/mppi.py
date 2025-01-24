@@ -37,7 +37,7 @@ class MPPIParams:
     dual: bool = False
 
 @flax.struct.dataclass
-class  :
+class MPPIRunningParams:
     a_mean: jnp.ndarray
     a_cov: jnp.ndarray  
     prev_a: jnp.ndarray

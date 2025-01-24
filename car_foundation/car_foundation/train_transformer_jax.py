@@ -72,8 +72,8 @@ val_every = 20
 batch_size = 512 #1024
 lambda_l2 = 1e-4
 #dataset_path = 'DATASET-PATH'
-dataset_path = '/disk1/collect_data_from_anycar/New_demo/total_data_1'
-check_data_path = '/disk1/collect_data_from_anycar/New_demo/check_data'
+dataset_path = '/disk1/collect_data_from_anycar/New_demo/total_data_2'
+check_data_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
 comment = 'jax'
 
 

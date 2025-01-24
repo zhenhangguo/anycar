@@ -27,10 +27,11 @@ Save_Data = True
 Add_DeadZone_ThS = False
 Back_Lash = True
 Random_Steer_Offset = False
+Fixed_steer_offset = -5 # deg
 Small_steer_cmd = True
 Small_max_steer_cmd = 30  # deg
 
-Total_Data_num  = 500
+Total_Data_num  = 50000
 Simend = 2000
 
 
@@ -60,7 +61,7 @@ def log_data(dataset: CarDataset, env: car_state, action):
         dataset.data_logs["xori_z"].append(env.car_orientation[3])
         #log linear velocity
         dataset.data_logs["xvel_x"].append(env.car_lin_vel[0])
-        dataset.data_logs["xvel_y"].append(env.car_lin_vel[1])   #, unset vy
+        dataset.data_logs["xvel_y"].append(env.car_lin_vel[1])
         dataset.data_logs["xvel_z"].append(0.0)
         #log linear acceleration
         dataset.data_logs["xacc_x"].append(env.car_lin_acc[0])
@@ -253,7 +254,7 @@ def rollout(params):
             return
 
         if Use_Steer_Angle:
-            log_data(dataset, vehicle_state, [action[0], steering_angle])
+            log_data(dataset, vehicle_state, [action[0], steering_angle + Fixed_steer_offset / 57.3])
         else:
             log_data(dataset, vehicle_state, action)
 

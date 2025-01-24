@@ -155,8 +155,8 @@ class TorchTransformerDecoder(nn.Module):
 
         x = self.transformer_decoder(action_emb, history_emb,
                                      tgt_is_causal=True, # memory_is_causal=True,
-                                     tgt_mask = tgt_mask,
-                                     # memory_mask = nn.Transformer.generate_square_subsequent_mask(history_emb.size(1), device=history_emb.device),
+                                     tgt_mask = nn.Transformer.generate_square_subsequent_mask(action_emb.size(1), device=action_emb.device),
+                                    #  memory_mask = nn.Transformer.generate_square_subsequent_mask(history_emb.size(1), device=history_emb.device),
                                      tgt_key_padding_mask=action_padding_mask,
                                      memory_key_padding_mask=history_padding_mask
                                     )
@@ -190,7 +190,7 @@ class TorchTransformer(nn.Module):
                              src_is_causal=True, tgt_is_causal=True, memory_is_causal=True,
                              src_mask = nn.Transformer.generate_square_subsequent_mask(history_emb.size(1), device=history_emb.device),
                              tgt_mask = nn.Transformer.generate_square_subsequent_mask(action_emb.size(1), device=action_emb.device),
-                             # memory_mask = nn.Transformer.generate_square_subsequent_mask(history_emb.size(1), device=history_emb.device),
+                             memory_mask = nn.Transformer.generate_square_subsequent_mask(history_emb.size(1), device=history_emb.device),
                              src_key_padding_mask=history_padding_mask,
                              tgt_key_padding_mask=action_padding_mask,
                              memory_key_padding_mask=history_padding_mask)

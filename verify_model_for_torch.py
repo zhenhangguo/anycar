@@ -1,6 +1,3 @@
-import flax
-import jax
-import jax.numpy as jnp
 import numpy as np
 import optax
 import orbax
@@ -13,20 +10,22 @@ import orbax.checkpoint
 from car_foundation import CAR_FOUNDATION_DATA_DIR, CAR_FOUNDATION_MODEL_DIR
 from car_foundation.dataset import MujocoDataset
 from car_foundation.jax_models import JaxTransformerDecoder
+from car_foundation.models import TorchMLP, TorchTransformer, TorchTransformerDecoder, TorchGPT2
 
 from verify_utils import *
+import torch.optim as optim
 
 Save_Fig = True
 
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-23T11:12:12.318-model_checkpoint"
-# dataset_path = '/disk1/collect_data_from_anycar/check_data/from_data_params_8'  #10 pkl
+model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-24T14:18:55.571-model_checkpoint"
+
 dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
-# dataset_path = "/disk1/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pde-a1"
-# dataset_path = "/disk1/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pdb-c11"
-Long_Path_sim = False
+
 fig_result_path = '/home/gzh//anycar/model_test_result_fig'
 
-model_checkpint = 200
+use_torch_encoder = True
+
+model_checkpint = 400
 
 history_length = 251
 prediction_length = 50
@@ -35,7 +34,6 @@ teacher_forcing = False
 binary_mask = False
 ATTACK = False  # verify data will not add noise
 
-batch_size = 1024
 state_dim = 6
 action_dim = 2
 latent_dim = 64
@@ -47,44 +45,74 @@ USE_ZERO_POINT=True
 dataset_files = glob.glob(os.path.join(dataset_path, '*.pkl')) # get all *.pkl file in this path
 test_dataset = MujocoDataset(dataset_files, history_length, prediction_length, delays=delays, teacher_forcing=teacher_forcing, binary_mask=binary_mask,attack=ATTACK, use_zero_point=USE_ZERO_POINT)
 
-rng = jax.random.PRNGKey(3407)
-rng, params_rng = jax.random.split(rng)
-rng, dropout_rng = jax.random.split(rng)
-init_rngs = {'params': params_rng, 'dropout': dropout_rng}
-global_rngs = init_rngs
+# Device to use
+device = torch.device("cuda")
+assert device.type == "cuda", "Only cuda is supported"
 
-jax_history_input = jnp.ones((batch_size, history_length-1, state_dim + action_dim), dtype=jnp.float32)
-jax_history_mask = jnp.ones((batch_size, (history_length-1) * 2 - 1), dtype=jnp.float32)
-jax_prediction_input = jnp.ones((batch_size, prediction_length, action_dim), dtype=jnp.float32)
-jax_prediction_mask = jnp.ones((batch_size, prediction_length), dtype=jnp.float32)
+if use_torch_encoder:
+    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout)
+else:
+    model = TorchTransformer(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, dropout)
+model = model.to(device)
 
-model = JaxTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, dropout, history_length - 1, prediction_length, jnp.bfloat16, name='decoder')
-val_collect = model.init(init_rngs, jax_history_input, jax_prediction_input, jax_history_mask, jax_prediction_mask)
+checkpoint = torch.load(model_path)
+model.load_state_dict(checkpoint['model_state_dict'])
+model.eval()
 
-orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-options = orbax.checkpoint.CheckpointManagerOptions(create=False, save_interval_steps=20)
-checkpoint_manager = orbax.checkpoint.CheckpointManager(model_path, orbax_checkpointer)
-raw_restored = checkpoint_manager.restore(os.path.join(model_path, f"{model_checkpint}"),"default")
-val_collect['params'] = raw_restored['model']['params']
+optimizer = optim.AdamW(model.parameters(), lr=0.001)
+optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-input_mean = jnp.array(raw_restored['input_mean'])
-input_std = jnp.array(raw_restored['input_std'])
+# set mean and std for checkpoint or other data
+input_mean = torch.tensor(checkpoint['input_mean'], dtype=torch.float32)
+input_std = torch.tensor(checkpoint['input_std'], dtype=torch.float32)
+input_mean = input_mean.to(device)
+input_std = input_std.to(device)
 
 print("input_mean = " + str(input_mean))
 print("input_std = " + str(input_std))
 
-print("model_hash = " + str(model_hash(val_collect['params'])))
+print("model_hash = " + str(model_hash(model.state_dict())))
 
-def val_episode(var_collect, episode_num, rngs):
+def align_yaw_torch(yaw_1, yaw_2):
+    d_yaw = yaw_1 - yaw_2
+    d_yaw_aligned = torch.atan2(torch.sin(d_yaw), torch.cos(d_yaw))
+    return d_yaw_aligned + yaw_2
+
+def apply_batch_torch(model, last_state, history, action, y, input_mean, input_std):
+    history = history.to(device)
+    y = y.to(device)
+
+    if use_torch_encoder:
+        history[:, :, :6] = (history[:, :, :6] - input_mean) / input_std
+    else:
+        history = (history[:, :, :6] - input_mean) / input_std
+    y[:, :, :6] = (y[:, :, :6] - input_mean) / input_std
+
+    x = history[:, 1:, :]
+    x = x.to(device)
+    action = action.to(device)
+
+    y_pred = model(x, action) * input_std + input_mean
+    last_pose = last_state[:, :6].to(device)
+    for i in range(y_pred.shape[1]):
+        # rotate dx, dy back to world frame
+        y_pred_x = y_pred[:, i, 0] * torch.cos(last_pose[:, 2]) - y_pred[:, i, 1] * torch.sin(last_pose[:, 2])
+        y_pred_y = y_pred[:, i, 0] * torch.sin(last_pose[:, 2]) + y_pred[:, i, 1] * torch.cos(last_pose[:, 2])
+        y_pred[:, i, 0] = y_pred_x
+        y_pred[:, i, 1] = y_pred_y
+        # accumulate the poses
+        y_pred[:, i, :6] += last_pose
+        y_pred[:, i, 2] = align_yaw_torch(y_pred[:, i, 2], 0.0)
+        last_pose = y_pred[:, i, :6]
+    return y_pred
+
+def val_episode(model, episode_num):
     episode = test_dataset.get_episode(episode_num)
-    episode = jnp.array(torch.unsqueeze(episode, 0).numpy())
+    episode = torch.unsqueeze(episode, 0)
     batch = episode[:, :, :-1]
     history, action, y, action_padding_mask = test_dataset[episode_num:episode_num+1]
-    history = jnp.array(history.numpy())
-    action = jnp.array(action.numpy())
-    y = jnp.array(y.numpy())
-    action_padding_mask = jnp.array(action_padding_mask.numpy())
-    predicted_states = apply_batch(var_collect, batch[:, history_length-1, :], history, action, y, action_padding_mask, rngs, input_mean, input_std, model)
+    predicted_states = apply_batch_torch(model, batch[:, history_length-1, :], history, action, y, input_mean, input_std)
+    predicted_states = predicted_states.cpu().detach().numpy()
     return np.array(predicted_states)
 
 # plot final result
@@ -95,21 +123,14 @@ def plot_final_result(data_num, rmse_dict):
         if epoch + 1 >= len(test_dataset):
             continue
         
-        predicted_states = val_episode(val_collect, epoch + 1, global_rngs)
+        predicted_states = val_episode(model, epoch + 1)
         episode = test_dataset.get_episode(epoch + 1)
 
-        if Long_Path_sim:
-            ground_truth_x = x_list
-            ground_truth_y =  y_list
-            ground_truth_vx =  vx_list
-            ground_truth_vy =  vy_list
-            ground_truth_yawrate =  yawrate_list
-        else:
-            ground_truth_x = episode[:, 0]
-            ground_truth_y =  episode[:, 1]
-            ground_truth_vx =  episode[:, 3]
-            ground_truth_vy =  episode[:, 4]
-            ground_truth_yawrate =  episode[:, 5]
+        ground_truth_x = episode[:, 0]
+        ground_truth_y =  episode[:, 1]
+        ground_truth_vx =  episode[:, 3]
+        ground_truth_vy =  episode[:, 4]
+        ground_truth_yawrate =  episode[:, 5]
 
         # calculate value rmse
         position_error_rmse = compute_vertor_rmse(episode[:, 0][-prediction_length:], episode[:, 1][-prediction_length:], predicted_states[0, :, 0], predicted_states[0, :, 1])
@@ -185,26 +206,6 @@ rmse_dict = {
     "v_error":[],
     "yaw_rate_error":[]
 }
-
-x_list = []
-y_list = []
-vx_list = []
-vy_list = []
-yawrate_list = []
-if Long_Path_sim:
-    for idx in range(data_num):
-        if len(x_list)== 0:
-            x_list = test_dataset.get_episode(idx)[:, 0].tolist()
-            y_list = test_dataset.get_episode(idx)[:, 1].tolist()
-            vx_list = test_dataset.get_episode(idx)[:, 3].tolist()
-            vy_list = test_dataset.get_episode(idx)[:, 4].tolist()
-            yawrate_list = test_dataset.get_episode(idx)[:, 5].tolist()
-        else:
-            x_list.extend(test_dataset.get_episode(idx)[:, 0][-10:].tolist())
-            y_list.extend(test_dataset.get_episode(idx)[:, 1][-10:].tolist())
-            vx_list.extend(test_dataset.get_episode(idx)[:, 3][-10:].tolist())
-            vy_list.extend(test_dataset.get_episode(idx)[:, 4][-10:].tolist())
-            yawrate_list.extend(test_dataset.get_episode(idx)[:, 5][-10:].tolist())
 
 clear_directory(fig_result_path + "/")
 plot_final_result(data_num, rmse_dict)
