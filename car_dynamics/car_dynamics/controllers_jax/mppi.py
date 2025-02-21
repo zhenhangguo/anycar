@@ -107,7 +107,7 @@ class MPPIController(BaseController):
         spline = InterpolatedUnivariateSpline(self.step_nodes, nodes, k=self.spline_order)
         us = spline(self.step_us)
         return us
-    
+
     @partial(jax.jit, static_argnums=(0,))
     def u2node(self, us):
         spline = InterpolatedUnivariateSpline(self.step_us, us, k=self.spline_order)
@@ -227,7 +227,6 @@ class MPPIController(BaseController):
         state_list = jnp.concatenate((state_list, state_list2), axis=0)
         state_list_jnp = jnp.array(state_list)
         return state_list_jnp
-
 
     
     @partial(jax.jit, static_argnums=(0,))
@@ -368,7 +367,7 @@ class MPPIController(BaseController):
         ## Note: 1. Sampling action trajectories
         key_use, self_key = jax.random.split(running_params.key, 2)
         key_use = jax.random.split(key_use, self.params.n_rollouts)
-        
+
         def single_sample(key, traj_mean, traj_cov):
             keys = jax.random.split(key, self.params.h_knot)
             return jax.vmap(
@@ -376,33 +375,32 @@ class MPPIController(BaseController):
             )(keys, traj_mean, traj_cov)
 
         a_mean_waypoint = running_params.a_mean[::self.params.num_intermediate]
-        
+
         ## Spline interpolation
         a_mean_waypoint = a_mean_waypoint.at[:, 0].set(self.u2node(running_params.a_mean[:, 0]))
         a_mean_waypoint = a_mean_waypoint.at[:, 1].set(self.u2node(running_params.a_mean[:, 1]))
-        
-        
+
         a_cov_waypoint = running_params.a_cov[::self.params.num_intermediate]
         
         a_sampled_waypoint = jax.vmap(single_sample, in_axes=(0, None, None))( # (N, h_knot, action_dim)
             key_use, a_mean_waypoint, a_cov_waypoint,
         )
-    
+
         ### Spline interpolation
         a_sampled = self.action_sampled.copy()
         a_sampled = a_sampled.at[:, :, 0].set(self.node2u_vmap(a_sampled_waypoint[:, :, 0]))
         a_sampled = a_sampled.at[:, :, 1].set(self.node2u_vmap(a_sampled_waypoint[:, :, 1]))
-        
+
 
         a_sampled_raw = self.normalize_action(a_sampled)
         a_sampled = self.action_init_buf.copy()
         a_sampled.at[:, :self.params.delay, :].set(running_params.prev_a)
         a_sampled = a_sampled.at[:, self.params.delay:, :].set(a_sampled_raw)
-        
+
         state_init = self.state_init_buf.copy()
         for i_ in range(self.params.num_obs):
             state_init = state_init.at[i_].set(state_init[i_] * obs[i_])
-        
+
         ## Note: 2. Simulating rollouts using the dynamics model
         self_key, key2 = jax.random.split(self_key, 2)
         state_list = self._get_rollout(key2, state_init, running_params.state_hist, a_sampled, dynamic_params_tuple, self.params.fix_history)   # List

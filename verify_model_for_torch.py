@@ -17,7 +17,7 @@ import torch.optim as optim
 
 Save_Fig = True
 
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-24T14:18:55.571-model_checkpoint"
+model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
 
 dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
 
@@ -36,9 +36,9 @@ ATTACK = False  # verify data will not add noise
 
 state_dim = 6
 action_dim = 2
-latent_dim = 64
+latent_dim = 256 #128 #64
 num_heads = 4
-num_layers = 2
+num_layers = 3 #2
 dropout = 0.1
 USE_ZERO_POINT=True
 

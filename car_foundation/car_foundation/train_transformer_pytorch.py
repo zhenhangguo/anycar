@@ -47,17 +47,19 @@ USE_ZERO_POINT= True
 
 lr_begin = 5e-4
 warmup_period = 500
-num_epochs = 200
+num_epochs = 50
 load_checkpoint = False
 resume_model_checkpint = 0
 resume_model_name = ""
 
-val_every = 20
-batch_size = 1024
+val_every = 50
+batch_size = 256
 lambda_l2 = 1e-4
 #dataset_path = 'DATASET-PATH'
 dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-14T16:39:46.443-nuplan-dynamic-model-base'
-check_data_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
+# dataset_path = '/disk1/collect_data_from_anycar/New_demo/total_data_2'
+# check_data_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
+check_data_path = '/disk1/collect_data_from_anycar/New_demo/check_data_with_offset'
 comment = 'jax'
 
 # Device to use
@@ -67,6 +69,13 @@ assert device.type == "cuda", "Only cuda is supported"
 resume_model_folder_path = os.path.join(CAR_FOUNDATION_MODEL_DIR, resume_model_name, f"{resume_model_checkpint}")
 
 num_workers = 6
+
+# state_dim = 6
+# action_dim = 2
+# latent_dim = 256 #128 #64
+# num_heads = 4
+# num_layers = 3 #2
+# dropout = 0.1
 
 state_dim = 6
 action_dim = 2
@@ -343,6 +352,23 @@ for epoch in track(range(num_epochs)):
     #             outputs = model(inputs)
     #             train_loss += criterion(outputs, targets).item()
     #         train_loss /= len(train_loader)
+        if (epoch + 1) % val_every == 0:
+            train_loss /= len(train_loader)
+            train_losses.append(train_loss)
+
+            checkpoint = {
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'batch_size': batch_size,
+                'num_epochs': num_epochs,
+                'train_losses': train_losses,
+                'val_losses': val_losses,
+                'input_mean': input_mean,
+                'input_std': input_std,
+                'epoch': epoch
+            }
+
+            torch.save(checkpoint, save_model_folder_path)
 
 
     #     val_losses.append(test_loss)
@@ -363,7 +389,8 @@ checkpoint = {
     'train_losses': train_losses,
     'val_losses': val_losses,
     'input_mean': input_mean,
-    'input_std': input_std
+    'input_std': input_std,
+    'epoch': epoch
 }
 
 torch.save(checkpoint, save_model_folder_path)

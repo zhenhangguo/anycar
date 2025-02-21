@@ -1,4 +1,4 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.2
 Name: car_foundation
 Version: 0.0.1
 Summary: car foundation
@@ -17,3 +17,7 @@ Requires-Dist: wandb
 Requires-Dist: transformers
 Requires-Dist: pytorch-warmup
 Requires-Dist: orbax-checkpoint==0.5.15
+Dynamic: author
+Dynamic: author-email
+Dynamic: requires-dist
+Dynamic: summary

@@ -9,8 +9,9 @@ from verify_utils import *
 
 Save_Fig = True
 
-onnx_model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/torch_transformer_decoder.onnx"
-dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
+onnx_model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/torch_transformer_decoder_test1.onnx"
+# dataset_path =  '/disk1/collect_data_from_anycar/New_demo/check_data_with_offset' 
+dataset_path =  '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
 
 fig_result_path = '/home/gzh/anycar/model_test_result_fig'
 
@@ -36,6 +37,7 @@ test_dataset = MujocoDataset(dataset_files, history_length, prediction_length, d
 ort_session = ort.InferenceSession(onnx_model_path)
 
 # Load checkpoint for mean and std
+# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
 model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-24T14:18:55.571-model_checkpoint"
 checkpoint = torch.load(model_path, weights_only=True)
 
@@ -61,6 +63,33 @@ def apply_batch_onnx(ort_session, last_state, history, action, y, input_mean, in
     x = history[:, 1:, :]
     action = action.copy()
 
+    # x.fill(1.0)
+    # action.fill(1.0)
+    # print("input_mean = " + str(input_mean))
+    # print("input_std = " + str(input_std))
+
+    # np.set_printoptions(threshold=np.inf)
+    # print("x = " + str(x))
+    # print("action = " + str(action))
+    # print("history_mask.shape = " + str((np.ones((history.shape[0], (history.shape[1]-1) * 2 - 1)))))
+    # print("prediction_mask.shape = " + str((np.ones((history.shape[0], prediction_length), dtype=np.float32))))
+
+    # x_byte_array = pickle.dumps(x)
+    # action_byte_array = pickle.dumps(action)
+    # history_mask_byte_array = pickle.dumps(((np.ones((history.shape[0], (history.shape[1]-1) * 2 - 1)))))
+    # prediction_mask_byte_array = pickle.dumps(((np.ones((history.shape[0], prediction_length), dtype=np.float32))))
+
+    # import base64
+    # x_base64_string = base64.b64encode(x_byte_array).decode('utf-8')
+    # action_base64_string = base64.b64encode(action_byte_array).decode('utf-8')
+    # history_mask_base64_string = base64.b64encode(history_mask_byte_array).decode('utf-8')
+    # prediction_mask_base64_string = base64.b64encode(prediction_mask_byte_array).decode('utf-8')   
+
+    # print("x_base64_string 字符串:", x_base64_string)
+    # print("action_base64_string 字符串:", action_base64_string)
+    # print("history_mask_base64_string 字符串:", history_mask_base64_string)
+    # print("prediction_mask_base64_string 字符串:", prediction_mask_base64_string)
+
     # Prepare inputs for ONNX model
     ort_inputs = {
         'history_input': x.astype(np.float32),
@@ -73,6 +102,12 @@ def apply_batch_onnx(ort_session, last_state, history, action, y, input_mean, in
     ort_outs = ort_session.run(None, ort_inputs)
     y_pred = ort_outs[0] * input_std + input_mean
 
+    # print(" before solve y_pred = " + str(y_pred))
+
+    # print("ort_outs = " + str((ort_outs)))
+    # print("ort_outs = " + str(ort_outs[0].shape))
+    # print("ort_outs = " + str(type(ort_outs)))
+
     last_pose = last_state[:, :6].copy()
     for i in range(y_pred.shape[1]):
         # rotate dx, dy back to world frame
@@ -84,6 +119,9 @@ def apply_batch_onnx(ort_session, last_state, history, action, y, input_mean, in
         y_pred[:, i, :6] += last_pose
         y_pred[:, i, 2] = align_yaw_onnx(y_pred[:, i, 2], 0.0)
         last_pose = y_pred[:, i, :6]
+    
+    # print(" after solve y_pred = " + str(y_pred))
+
     return y_pred
 
 def val_episode_onnx(ort_session, episode_num):
