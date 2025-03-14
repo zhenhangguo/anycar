@@ -27,7 +27,7 @@ Save_Data = True
 Add_DeadZone_ThS = False
 Back_Lash = True
 Random_Steer_Offset = False
-Fixed_steer_offset = -5 # deg
+Fixed_steer_offset = 5 # deg
 Small_steer_cmd = True
 Small_max_steer_cmd = 30  # deg
 
@@ -147,7 +147,7 @@ def rollout(params):
     # vehicle_ratio
     vehicle_ratio = 25
 
-    heading = np.random.uniform(-3.14 / 2., 3.14 / 2.)
+    heading = np.random.uniform(-3.14, 3.14)
 
     lon_speed = np.random.uniform(5, 25)
 

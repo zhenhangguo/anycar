@@ -9,9 +9,17 @@ from verify_utils import *
 
 Save_Fig = True
 
-onnx_model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/torch_transformer_decoder_test1.onnx"
+onnx_model_path = "/home/gzh/Desktop/torch_transformer_decoder_fix_batch_size_1_0311_sanitize.onnx"
 # dataset_path =  '/disk1/collect_data_from_anycar/New_demo/check_data_with_offset' 
 dataset_path =  '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
+# dataset_path = '/disk1/collect_data_from_anycar/check_data/verify_bag_data_0310'
+
+
+# *************************Load checkpoint for mean and std******************
+# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
+# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-24T14:18:55.571-model_checkpoint"
+model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-11T19:25:14.129-model_checkpoint"
+
 
 fig_result_path = '/home/gzh/anycar/model_test_result_fig'
 
@@ -24,9 +32,9 @@ ATTACK = False  # verify data will not add noise
 
 state_dim = 6
 action_dim = 2
-latent_dim = 64
+latent_dim = 256 #128 #64
 num_heads = 4
-num_layers = 2
+num_layers = 3 #2
 dropout = 0.1
 USE_ZERO_POINT = True
 
@@ -36,9 +44,6 @@ test_dataset = MujocoDataset(dataset_files, history_length, prediction_length, d
 # Load ONNX model
 ort_session = ort.InferenceSession(onnx_model_path)
 
-# Load checkpoint for mean and std
-# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-24T14:18:55.571-model_checkpoint"
 checkpoint = torch.load(model_path, weights_only=True)
 
 # set mean and std for checkpoint or other data
@@ -57,8 +62,15 @@ def apply_batch_onnx(ort_session, last_state, history, action, y, input_mean, in
     history = history.copy()
     y = y.copy()
 
+    # print("history = " + str(history))
+    # print("history[:,:,:2] = " + str(history[:,:,:2]))
+
     history[:, :, :6] = (history[:, :, :6] - input_mean) / input_std
     y[:, :, :6] = (y[:, :, :6] - input_mean) / input_std
+
+    # print("input_std = " + str(input_std))
+    # print("history after regularized = " + str(history))
+    # print("history[:,1,2] after = " + str(history[:,1,2]))
 
     x = history[:, 1:, :]
     action = action.copy()
@@ -68,7 +80,7 @@ def apply_batch_onnx(ort_session, last_state, history, action, y, input_mean, in
     # print("input_mean = " + str(input_mean))
     # print("input_std = " + str(input_std))
 
-    # np.set_printoptions(threshold=np.inf)
+    np.set_printoptions(threshold=np.inf)
     # print("x = " + str(x))
     # print("action = " + str(action))
     # print("history_mask.shape = " + str((np.ones((history.shape[0], (history.shape[1]-1) * 2 - 1)))))
@@ -90,6 +102,14 @@ def apply_batch_onnx(ort_session, last_state, history, action, y, input_mean, in
     # print("history_mask_base64_string 字符串:", history_mask_base64_string)
     # print("prediction_mask_base64_string 字符串:", prediction_mask_base64_string)
 
+    # aaa = x[:, :, :6] * input_std + input_mean
+
+    # for i in range(aaa.shape[1]):
+    #     print("aaa[:, i, 2] = " + str(aaa[:, i, 2] * 57.3))
+    #     print("aaa[:, i, 5] = " + str(aaa[:, i, 5] * 57.3))
+    
+    # print("action")
+
     # Prepare inputs for ONNX model
     ort_inputs = {
         'history_input': x.astype(np.float32),
@@ -104,11 +124,18 @@ def apply_batch_onnx(ort_session, last_state, history, action, y, input_mean, in
 
     # print(" before solve y_pred = " + str(y_pred))
 
-    # print("ort_outs = " + str((ort_outs)))
+    # print("ort_outs[0] = " + str((ort_outs[0])))
     # print("ort_outs = " + str(ort_outs[0].shape))
-    # print("ort_outs = " + str(type(ort_outs)))
+    # print("y_pred = " + str((y_pred)))
 
     last_pose = last_state[:, :6].copy()
+
+    # last_pose[:,0] = -11929.7
+    # last_pose[:,1] = 4443.27
+    # last_pose[:,2] = 2.36554
+    # last_pose[:,3] = 19.3721
+    # last_pose[:,4] = 0.0125156
+    # last_pose[:,5] = 0.00343902
     for i in range(y_pred.shape[1]):
         # rotate dx, dy back to world frame
         y_pred_x = y_pred[:, i, 0] * np.cos(last_pose[:, 2]) - y_pred[:, i, 1] * np.sin(last_pose[:, 2])

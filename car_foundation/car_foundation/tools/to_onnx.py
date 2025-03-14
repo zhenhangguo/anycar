@@ -4,19 +4,28 @@ import torch.nn as nn
 
 from car_foundation.models import TorchTransformerDecoder, TorchGPT2
 
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-24T14:18:55.571-model_checkpoint"
+# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-24T14:18:55.571-model_checkpoint"
+# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
+model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-11T19:25:14.129-model_checkpoint"
 output_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/"
+
+# state_dim = 6
+# action_dim = 2
+# latent_dim = 64
+# num_heads = 4
+# num_layers = 2
+# dropout = 0.1
 
 state_dim = 6
 action_dim = 2
-latent_dim = 64
+latent_dim = 256 #128 #64
 num_heads = 4
-num_layers = 2
+num_layers = 3 #2
 dropout = 0.1
 
 history_length = 250
 prediction_length = 50
-batch_size = 1
+batch_size = 16
 
 # Device to use
 device = torch.device("cuda")
@@ -34,7 +43,7 @@ prediction_input = torch.randn(batch_size, prediction_length, action_dim)
 prediction_mask = torch.ones(batch_size, prediction_length)
 
 # 导出模型到 ONNX 格式
-output_onnx_path = output_path + "torch_transformer_decoder_test1.onnx"
+output_onnx_path = output_path + "torch_transformer_decoder_fix_batch_size_16_0311.onnx"
 torch.onnx.export(
     model, 
     (history_input, prediction_input, history_mask, prediction_mask), 

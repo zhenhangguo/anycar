@@ -21,7 +21,7 @@ from generate_data_utils import *
 model_path = "/home/gzh/Desktop/anycar/anycar/car_foundation/car_foundation/models/2024-11-19-model_checkpoint/"
 
 # dataset_path = '/home/gzh/Desktop/anycar/anycar/car_foundation/car_foundation/data/data_verify'  #10 pkl
-dataset_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/total_data'  #10 pkl
+dataset_path = '/disk1/collect_data_from_anycar/2025-03-11T17:19:31.119-nuplan-dynamic-model'  #10 pkl
 Long_Path_sim = False
 fig_result_path = '/home/gzh/Desktop/anycar/anycar/model_test_result_fig'
 

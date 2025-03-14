@@ -47,17 +47,17 @@ USE_ZERO_POINT= True
 
 lr_begin = 5e-4
 warmup_period = 500
-num_epochs = 50
+num_epochs = 400
 load_checkpoint = False
 resume_model_checkpint = 0
 resume_model_name = ""
 
 val_every = 50
-batch_size = 256
+batch_size = 512
 lambda_l2 = 1e-4
 #dataset_path = 'DATASET-PATH'
-dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-14T16:39:46.443-nuplan-dynamic-model-base'
-# dataset_path = '/disk1/collect_data_from_anycar/New_demo/total_data_2'
+dataset_path = '/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1'
+# dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'
 # check_data_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
 check_data_path = '/disk1/collect_data_from_anycar/New_demo/check_data_with_offset'
 comment = 'jax'
@@ -70,19 +70,19 @@ resume_model_folder_path = os.path.join(CAR_FOUNDATION_MODEL_DIR, resume_model_n
 
 num_workers = 6
 
-# state_dim = 6
-# action_dim = 2
-# latent_dim = 256 #128 #64
-# num_heads = 4
-# num_layers = 3 #2
-# dropout = 0.1
-
 state_dim = 6
 action_dim = 2
-latent_dim = 64
+latent_dim = 256 #128 #64
 num_heads = 4
-num_layers = 2
+num_layers = 3 #2
 dropout = 0.1
+
+# state_dim = 6
+# action_dim = 2
+# latent_dim = 64
+# num_heads = 4
+# num_layers = 2
+# dropout = 0.1
 
 save_model_folder_prefix = datetime.datetime.now().isoformat(timespec='milliseconds')
 save_model_folder_path = os.path.join(CAR_FOUNDATION_MODEL_DIR, f'{save_model_folder_prefix}-model_checkpoint')
@@ -102,7 +102,7 @@ elif architecture == 'cnn':
 elif architecture == 'torch':
     model = TorchTransformer(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, dropout)
 elif architecture == "torch_decoder":
-    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout)
+    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout).to(device) 
 
 # Load the dataset
 binary_mask = False # type(model) == TorchGPT2
@@ -122,9 +122,9 @@ print("train data length", len(train_dataset))
 val_dataset = MujocoDataset(data_20, history_length, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK, use_zero_point=USE_ZERO_POINT)
 test_dataset = MujocoDataset(data_10, history_length, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK, use_zero_point=USE_ZERO_POINT)
 
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
 
 num_steps_per_epoch = len(train_loader)
 
@@ -315,7 +315,7 @@ for epoch in track(range(num_epochs)):
         action = action.to(device)
         y = y.to(device)
         action_padding_mask = action_padding_mask.to(device)
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
 
         # 更新学习率
         global_step = epoch * len(train_loader) + i 

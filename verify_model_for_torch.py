@@ -17,9 +17,10 @@ import torch.optim as optim
 
 Save_Fig = True
 
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
-
+# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
+model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-11T19:25:14.129-model_checkpoint"
 dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
+# dataset_path = '/disk1/collect_data_from_anycar/check_data/verify_bag_data_0310'  #10 pkl
 
 fig_result_path = '/home/gzh//anycar/model_test_result_fig'
 

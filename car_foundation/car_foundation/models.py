@@ -100,27 +100,110 @@ class PositionalEncoding(nn.Module):
         x = x + self.pe[:, :x.size(1)]
         return self.dropout(x)
     
+# class LearnedPositionalEncoding(nn.Module):
+#     def __init__(self, d_model: int, max_len: int = 5000, flip=False):
+#         super().__init__()
+#         self.pe = nn.Parameter(torch.randn(max_len, d_model))
+#         self.dropout = nn.Dropout(0.1)
+#         self.flip = flip
+
+#     def forward(self, x: Tensor) -> Tensor:
+#         """
+#         Arguments:
+#             x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
+#         """
+#         if self.flip:
+#             x = x + torch.flip(self.pe[:x.size(1)], [0])
+#         else:
+#             x = x + self.pe[:x.size(1)]
+#         return self.dropout(x)
+
 class LearnedPositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int = 5000, flip=False):
+    def __init__(self, d_model: int, device, max_len: int = 5000, flip=False, dropout=0.1):
         super().__init__()
-        self.pe = nn.Parameter(torch.randn(max_len, d_model))
-        self.dropout = nn.Dropout(0.1)
+        self.d_model = d_model
+        self.max_len = max_len
         self.flip = flip
 
-    def forward(self, x: Tensor) -> Tensor:
-        """
-        Arguments:
-            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
-        """
+        self.position_emb = nn.Parameter(torch.Tensor(max_len, d_model).to(device))
+        nn.init.xavier_uniform_(self.position_emb, gain=nn.init.calculate_gain('linear'))
+
         if self.flip:
-            x = x + torch.flip(self.pe[:x.size(1)], [0])
+            self.register_buffer('flipped_emb', torch.flip(self.position_emb, dims=[0]), persistent=False)
         else:
-            x = x + self.pe[:x.size(1)]
+            self.register_buffer('flipped_emb', None, persistent=False)
+            
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Tensor, shape [batch_size, seq_len, d_model] (batch_first=True)
+               or [seq_len, batch_size, d_model] (batch_first=False)
+        """
+        seq_len = x.size(1) if x.dim() == 3 and x.size(0) > 1 else x.size(0)
+        
+        # 序列长度检查
+        if seq_len > self.max_len:
+            raise ValueError(f"序列长度 {seq_len} 超过最大预设长度 {self.max_len}")
+        
+        pe = self.flipped_emb[:seq_len] if self.flip else self.position_emb[:seq_len]
+
+        if x.dim() == 3 and x.size(2) == self.d_model:
+            pe = pe.unsqueeze(0) if x.size(0) != 1 else pe  # 处理 batch_size=1
+        x = x + pe
+
         return self.dropout(x)
-    
+
+# class TorchTransformerDecoder(nn.Module):
+#     def __init__(self, state_dim, action_dim, output_dim, latent_dim, num_heads, num_layers, device, dropout=0.1, history_length=250, prediction_length=50):
+#         super().__init__()
+#         self.state_dim = state_dim
+#         self.action_dim = action_dim
+#         self.output_dim = output_dim
+#         self.latent_dim = latent_dim
+#         self.history_length = history_length
+#         self.prediction_length = prediction_length
+
+#         self.odd_indices = torch.arange(0, history_length * 2 - 1, 2, device=device)
+#         self.even_indices = torch.arange(1, history_length * 2 - 1, 2, device=device)
+
+#         self.state_embedding = nn.Linear(state_dim, latent_dim)
+#         self.action_embedding = nn.Linear(action_dim, latent_dim)
+#         self.output_embedding = nn.Linear(latent_dim, self.output_dim)
+        
+#         self.history_pos_emb = LearnedPositionalEncoding(latent_dim, history_length * 2 - 1, flip=True)
+#         self.action_pos_emb = LearnedPositionalEncoding(latent_dim, prediction_length)
+#         transformer_decoder_layer = nn.TransformerDecoderLayer(d_model=latent_dim, nhead=num_heads, dim_feedforward=512, dropout=dropout, batch_first=True)
+#         self.transformer_decoder = nn.TransformerDecoder(transformer_decoder_layer, num_layers=num_layers)
+
+#     def forward(self, history, action, history_padding_mask=None, action_padding_mask=None, tgt_mask=None):
+
+#         state_emb = self.state_embedding(history[:, :, :self.state_dim])
+#         action_emb = self.action_embedding(history[:, :, self.state_dim:self.state_dim+self.action_dim])
+#         history_emb = torch.cat((state_emb[:, None, :, :], action_emb[:, None, :, :]), dim=1).view(-1, 2 * self.history_length, self.latent_dim).transpose(1, 2).contiguous().view(-1, 2 * self.history_length, self.latent_dim)[:, :-1, :]
+        
+#         history_emb = self.history_pos_emb(history_emb)
+
+#         action_emb = self.action_embedding(action)
+#         action_emb = self.action_pos_emb(action_emb)
+
+#         x = self.transformer_decoder(action_emb, history_emb,
+#                                      tgt_is_causal=True,
+#                                      tgt_mask = nn.Transformer.generate_square_subsequent_mask(action_emb.size(1), action_emb.device),
+#                                      tgt_key_padding_mask=action_padding_mask,
+#                                      memory_key_padding_mask=history_padding_mask
+#                                     )
+#         x = self.output_embedding(x)
+#         return x
+
+
 class TorchTransformerDecoder(nn.Module):
-    def __init__(self, state_dim, action_dim, output_dim, latent_dim, num_heads, num_layers, device, dropout=0.1, history_length=250, prediction_length=50):
+    def __init__(self, state_dim, action_dim, output_dim, latent_dim, num_heads, 
+                num_layers, device, dropout=0.1, history_length=250, prediction_length=50):
         super().__init__()
+        # 显式初始化维度参数
+        self.device = device
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.output_dim = output_dim
@@ -128,41 +211,65 @@ class TorchTransformerDecoder(nn.Module):
         self.history_length = history_length
         self.prediction_length = prediction_length
 
-        self.odd_indices = torch.arange(0, history_length * 2 - 1, 2, device=device)
-        self.even_indices = torch.arange(1, history_length * 2 - 1, 2, device=device)
-
-        self.state_embedding = nn.Linear(state_dim, latent_dim)
-        self.action_embedding = nn.Linear(action_dim, latent_dim)
-        self.output_embedding = nn.Linear(latent_dim, self.output_dim)
+        # 合并嵌入层
+        self.embedding = nn.ModuleDict({
+            'state': nn.Linear(state_dim, latent_dim),
+            'action': nn.Linear(action_dim, latent_dim),
+            'output': nn.Linear(latent_dim, output_dim)
+        }).to(device)
         
-        self.history_pos_emb = LearnedPositionalEncoding(latent_dim, history_length * 2 - 1, flip=True)
-        self.action_pos_emb = LearnedPositionalEncoding(latent_dim, prediction_length)
-        transformer_decoder_layer = nn.TransformerDecoderLayer(d_model=latent_dim, nhead=num_heads, dim_feedforward=512, dropout=dropout, batch_first=True)
-        self.transformer_decoder = nn.TransformerDecoder(transformer_decoder_layer, num_layers=num_layers)
-
-    def forward(self, history, action, history_padding_mask=None, action_padding_mask=None, tgt_mask=None):
-        # history_emb = torch.zeros(history.size(0), history.size(1) * 2 - 1, self.latent_dim, device=history.device)
-        # history_emb[self.odd_indices] = self.state_embedding(history[:, :, :self.state_dim]) # shape: [batch_size, seq_length, latent_dim]
-        # history_emb[self.even_indices] = self.action_embedding(history[:, :-1, self.state_dim:self.state_dim+self.action_dim]) # shape: [batch_size, seq_length-1, latent_dim]
-        state_emb = self.state_embedding(history[:, :, :self.state_dim])
-        action_emb = self.action_embedding(history[:, :, self.state_dim:self.state_dim+self.action_dim])
-        history_emb = torch.cat((state_emb[:, None, :, :], action_emb[:, None, :, :]), dim=1).view(-1, 2 * self.history_length, self.latent_dim).transpose(1, 2).contiguous().view(-1, 2 * self.history_length, self.latent_dim)[:, :-1, :]
+        # 预生成因果掩码
+        self.register_buffer('tgt_mask', 
+                           nn.Transformer.generate_square_subsequent_mask(prediction_length).to(device))
         
-        history_emb = self.history_pos_emb(history_emb)
+        # 位置编码
+        self.position_encoding = nn.ModuleDict({
+            'history': LearnedPositionalEncoding(latent_dim, device, 2*history_length-1, flip=True).to(device) ,
+            'action': LearnedPositionalEncoding(latent_dim, device, prediction_length).to(device) 
+        })
+        
+        # Transformer 结构
+        self.transformer_decoder = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(
+                d_model=latent_dim,
+                nhead=num_heads,
+                dim_feedforward=512,
+                dropout=dropout,
+                batch_first=True,
+                device=device
+            ), 
+            num_layers=num_layers
+        ).to(device)
 
-        action_emb = self.action_embedding(action)
-        action_emb = self.action_pos_emb(action_emb)
+        self.register_buffer('dummy', torch.tensor(0, device=device), persistent=False)
 
-        x = self.transformer_decoder(action_emb, history_emb,
-                                     tgt_is_causal=True, # memory_is_causal=True,
-                                     tgt_mask = self.generate_square_subsequent_mask_custom(action_emb.size(1), action_emb.device),
-                                    #  memory_mask = nn.Transformer.generate_square_subsequent_mask(history_emb.size(1), device=history_emb.device),
-                                     tgt_key_padding_mask=action_padding_mask,
-                                     memory_key_padding_mask=history_padding_mask
-                                    )
-        x = self.output_embedding(x)
-        return x
-                                     
+    def _build_history_emb(self, history: torch.Tensor) -> torch.Tensor:
+        """向量化的历史序列构建"""
+        state_emb = self.embedding['state'](history[..., :self.state_dim])
+        action_emb = self.embedding['action'](history[..., self.state_dim:])
+        
+        # 堆叠后调整维度
+        interleaved = torch.stack([state_emb, action_emb], dim=2)
+        interleaved = interleaved.view(interleaved.size(0), -1, interleaved.size(-1))
+        return interleaved[:, :-1, :]
+
+    def forward(self, history, action, history_padding_mask=None, action_padding_mask=None):
+        history_emb = self._build_history_emb(history).to(self.device)
+        history_emb = self.position_encoding['history'](history_emb).to(self.device)
+        
+        action_emb = self.position_encoding['action'](
+            self.embedding['action'](action)
+        ).to(self.device)
+        
+        out = self.transformer_decoder(
+            tgt=action_emb,
+            memory=history_emb,
+            tgt_mask=self.tgt_mask.to(self.device),
+            tgt_key_padding_mask=action_padding_mask.to(self.device) if action_padding_mask is not None else None,
+            memory_key_padding_mask=history_padding_mask.to(self.device) if history_padding_mask is not None else None,
+        )
+        return self.embedding['output'](out)
+
 class TorchTransformer(nn.Module):
     def __init__(self, history_dim, action_dim, output_dim, latent_dim, num_heads, num_layers, dropout=0.1):
         super().__init__()

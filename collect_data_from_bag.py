@@ -366,7 +366,6 @@ class BagDataAnalyzer:
 
         raise RuntimeError("failed to get header timestamps from topic: {}, example: {}".format(topic, msg_list[0]))
 
-
     def sort_topic(self, topic_dict):
         # if different topic timestamp is different, sync to the same
         # select data in auto model
@@ -431,8 +430,8 @@ auto_mode_flag_topic = "/vehicle/dbw_reports:superpilot_enabled"
 
 # choose vehicle name for save data
 # Vehicle_Name = "pdb_c11"
-Vehicle_Name = "pde_a1"
-# Vehicle_Name = "debug"
+# Vehicle_Name = "pde_a1"
+Vehicle_Name = "debug"
 
 # temp use params
 steer_ratio = 25
@@ -459,7 +458,8 @@ if __name__ == '__main__':
     if Vehicle_Name == "pdb_c11":
         file_save_path = "/disk/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pdb-c11"
     if Vehicle_Name == "debug":
-        file_save_path = "/disk/collect_data_from_anycar/check_data/temp_check_data_quantity"
+        file_save_path = "/disk/collect_data_from_anycar/check_data/verify_bag_data_0310"
+
     os.makedirs(file_save_path, exist_ok=True)
     
     input_bag_list = FileFinder(file_suffix_list=['bag', 'db']).find_bags_in_(args.input)
