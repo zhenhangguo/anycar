@@ -1,0 +1,121 @@
+pth_model_path: 'car_foundation/car_foundation/tools/2025-03-11T19:25:14.129-model_checkpoint'
+
+decoder_onnx_model_path: 'car_foundation/car_foundation/tools/verify_convert.onnx'
+
+# model params
+state_dim:            6
+action_dim:           2
+latent_dim:           256
+num_heads:            4
+num_layers:           3
+dropout:              0.1
+history_length:       250
+prediction_length:    50
+
+batch_size:           1
+
+opset_version:        14
+
+
+# common config
+encoder_onnx_model_path: null
+encoder_trt_engine_path: null
+
+decoder_onnx_model_path1: null
+decoder_onnx_model_path2: null
+decoder_trt_engine_path: null
+decoder_trt_engine_path1: null
+decoder_trt_engine_path2: null
+device: "cuda"
+dataset_dir: ??? # Directory containing the dataset
+
+atol: 1e-5
+rtol: 1e-3
+
+profile_pth_encoder: false # profile pth encoder
+profile_pth_decoder: false # profile pth decoder
+
+# dataset_path
+# convert_to_onnx.py
+fixed_timesteps: true
+print_model: false
+convert_encoder: true
+convert_decoder: true
+# orin bsp 6.0.5 with tensorrt 8.4 8.5 not fully support opset 17 yet
+# orin bsp 6.0.9 with tensorrt 8.6 support opset 17
+export_verbose: false
+# for encoder tensorrt optimization profiles
+min_num_agents: 1
+opt_num_agents: 4
+max_num_agents: 6
+min_num_lanes: 1
+opt_num_lanes: 3
+max_num_lanes: 40
+builder_optimization_level: null # null to use default level
+# below are the layer output names for hivt encoder model including extra output: query, key, value,
+# if they are removed from the model output
+# encoder_mark_output: [
+#   "local_embed",
+#   "global_embed",
+#   "/global_interactor/global_interactor_layers.0/Reshape_output_0",
+#   "/global_interactor/global_interactor_layers.0/Reshape_1_output_0",
+#   "/global_interactor/global_interactor_layers.0/Reshape_2_output_0",
+#   "/global_interactor/global_interactor_layers.1/Reshape_output_0",
+#   "/global_interactor/global_interactor_layers.1/Reshape_1_output_0",
+#   "/global_interactor/global_interactor_layers.1/Reshape_2_output_0",
+#   "/global_interactor/global_interactor_layers.2/Reshape_output_0",
+#   "/global_interactor/global_interactor_layers.2/Reshape_1_output_0",
+#   "/global_interactor/global_interactor_layers.2/Reshape_2_output_0",
+# ]
+encoder_mark_output: [
+   "local_embed",
+   "global_embed",
+]
+enable_encoder_mark_output: false
+decoder_mark_output: []
+enable_decoder_mark_output: true
+
+
+# model_helper.py
+engine_data_path: null # path to the engine data dumpped from C++ tensorrt with .yml.gz postfix
+count_parameters: false # count model parameters
+plot_engine_data: false # plot engine data in the order of scores, press 'n' for next figure, 'b' for previous figure, 'x' to quit plot
+compare_engine_data: false # compare engine data with pth/onnx model output
+data_in_sl: true # input data are in sl coordinate
+
+
+# faiss_similarity_search.py
+query_scenario_token: ??? # Scenario token to query
+query_engine_data_path: ??? # path to the engine data dumpped from C++ tensorrt with .yml.gz postfix
+
+
+# convert_npz_to_parquet.py
+# add a default value here to avoid resolving error for debug_plot_save_dir and metric_plot_save_dir when dumping the config
+output_dir: /tmp
+parquet_config:
+  npz_dir: ???
+  parquet_dir: ???
+  bucket_size: 1000
+  num_processes: 4
+
+
+# dump_visualizer.py
+dump_visualizer_config:
+  engine_data_dir: /tmp/dtpp/engine_data  # directory of engine data dumped from C++ tensorrt with .yml.gz postfix
+  model_path: null  # path to the model checkpoint for offline re-inference
+
+
+# compare_model.py
+compare_model_config:
+  model_dir_list: ???  # dir of models to be compared
+  model_description_list: ???  # model descriptions and will be used as the key for related model metrics
+  encoder_type_list: ???  # should in [hivt, dtpp]
+  save_path: /tmp
+
+# scenario_inference_visualization
+scenario_inference_visualization_config:
+  query_scenario_token: ???  # scenario token to be inferenced
+
+defaults:
+  - default.yaml
+  - _self_
