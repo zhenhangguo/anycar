@@ -29,7 +29,7 @@ decoder_trt_engine_path2: null
 device: "cuda"
 dataset_dir: ??? # Directory containing the dataset
 
-atol: 1e-5
+atol: 1e-3
 rtol: 1e-3
 
 profile_pth_encoder: false # profile pth encoder

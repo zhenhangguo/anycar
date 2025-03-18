@@ -1,3 +1,10 @@
+# convert_to_onnx_and_check_for_pytorch.py
+# environment suggesstion:
+# 1. need in drive docker and nuplan environment(python version: 3.9)
+# 2. need reinstall tensorrt for python version: 3.9
+# 3. need install pycuda, onnx, torch, onnxruntime, omegaconf, tqdm, polygraphy, matplotlib, onnx_graphsurgeon
+
+
 import os
 import sys
 
@@ -5,9 +12,11 @@ import numpy as np
 import onnx
 import onnxruntime
 import tensorrt as trt
+import pycuda.driver as cuda
+import pycuda.autoinit
+
 import torch
 from omegaconf import DictConfig, OmegaConf
-import pycuda.driver as cuda
 
 import glob
 
@@ -17,10 +26,10 @@ sys.stderr = os.fdopen(sys.stderr.fileno(), "w", buffering=1)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from typing import Optional, Callable
-from car_foundation.models import TorchTransformerDecoder
-from car_foundation.dataset import MujocoDataset
+from utils_for_test import *
 
-from polygraphy.tools.surgeon.subtool import Sanitize
+import onnx_graphsurgeon
+from polygraphy.backend.onnx import fold_constants
 
 def to_numpy(tensor):
     if isinstance(tensor, np.ndarray):
@@ -112,33 +121,35 @@ def convert_decoder_to_onnx(
         onnx.checker.check_model(decoder_onnx_model)
     except onnx.checker.ValidationError as e:
         raise RuntimeError(f"Invalid ONNX decoder model: {e}")
-    onnx_decoder = onnxruntime.InferenceSession(decoder_onnx_model.SerializeToString())
 
-    # sanitize_config = {"fold_constants": True}
-    # onnx_decoder = Sanitize(onnx_decoder, **sanitize_config).execute()
+    # fold constants
+    decoder_onnx_model = fold_constants(decoder_onnx_model)
+    onnx.save(decoder_onnx_model, onnx_model_path)
+
+    onnx_decoder = onnxruntime.InferenceSession(decoder_onnx_model.SerializeToString())
 
     print("==== To test decoder outputs again with exported inputs")
     test_decoder_outputs(
         pth_decoder, onnx_decoder, pth_inputs, onnx_inputs, rtol=cfg.rtol, atol=cfg.atol
     )
 
-    # trt_engine = convert_decoder_to_trt(cfg, onnx_model_path, trt_engine_path)
+    trt_engine = convert_decoder_to_trt(cfg, onnx_model_path, trt_engine_path)
 
-    # print(
-    #     f"==== To test tensorrt decoder outputs"
-    # )
-    # _, pth_inputs, onnx_inputs,_ = generate_decoder_inputs(
-    #     cfg, dataset
-    # )
-    # test_decoder_trt_outputs(
-    #     pth_decoder,
-    #     trt_engine,
-    #     pth_inputs,
-    #     onnx_inputs,
-    #     output_names,
-    #     rtol=cfg.rtol,
-    #     atol=cfg.atol,
-    # )
+    print(
+        f"==== To test tensorrt decoder outputs"
+    )
+    _, pth_inputs, onnx_inputs,_ = generate_decoder_inputs(
+        cfg, dataset
+    )
+    test_decoder_trt_outputs(
+        pth_decoder,
+        trt_engine,
+        pth_inputs,
+        onnx_inputs,
+        output_names,
+        rtol=cfg.rtol,
+        atol=cfg.atol,
+    )
 
 
 def test_decoder_outputs(
@@ -233,7 +244,12 @@ def convert_onnx_to_trt(
     if builder_optimization_level is not None:
         config.builder_optimization_level = builder_optimization_level
 
-    serialized_network = builder.build_serialized_network(network, config)
+    try:
+        serialized_network = builder.build_serialized_network(network, config)
+    except Exception as e:
+        print(f"Error building serialized network: {e}")
+        print("Check the network structure for unsupported layers.")
+
     if serialized_network is None:
         raise RuntimeError("Failed to serialize the network.")
 
@@ -278,6 +294,8 @@ def infer_trt(engine, inputs, encoder_type=None):
         inputs: Input tensors
         encoder_type: "hivt", "dtpp", or None (for decoder)
     """
+    cuda.init() 
+    device = cuda.Device(0)
     context = engine.create_execution_context()
     stream = cuda.Stream()
 
@@ -386,7 +404,7 @@ def test_decoder_trt_outputs(
 ):
     print("Test outputs between pytorch and tensorrt decoder model ......")
 
-    pth_outputs = pth_model(pth_inputs)
+    pth_outputs = pth_model(*pth_inputs)
     trt_outputs = infer_trt(trt_engine, onnx_inputs)
 
     assert_error_num = 0
@@ -400,7 +418,7 @@ def test_decoder_trt_outputs(
                 print(f" - Output {name} is not in tensorrt outputs")
                 continue
             np.testing.assert_allclose(
-                trt_outputs[name], to_numpy(pth_outputs[i]), rtol=rtol, atol=atol
+                trt_outputs[name].squeeze(axis=0), to_numpy(pth_outputs[i]), rtol=rtol, atol=atol
             )
             print(f" o Output {name} is valid")
         except AssertionError as e:
