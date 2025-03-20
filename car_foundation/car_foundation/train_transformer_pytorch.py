@@ -190,97 +190,9 @@ input_std = input_std.to(device)
 print("mean: ", input_mean.tolist())
 print("std: ", input_std.tolist())
 
-# def apply_batch(var_collect, last_state, history, action, y, action_padding_mask, rngs):
-#     history = history.at[:, :, :6].set((history[:, :, :6] - input_mean) / input_std)
-#     y = y.at[:, :, :6].set((y[:, :, :6] - input_mean) / input_std)
-
-#     x = history[:, 1:, :]
-#     # tgt_mask = nn.Transformer.generate_square_subsequent_mask(action.size(1), device=action.device)
-#     y_pred = model.apply(var_collect, x, action, action_padding_mask=action_padding_mask, rngs=rngs, deterministic=True) * input_std + input_mean
-#     last_pose = last_state[:, :6]
-#     for i in range(y_pred.shape[1]):
-#         # rotate dx, dy back to world frame
-#         y_pred_x = y_pred[:, i, 0] * jnp.cos(last_pose[:, 2]) - y_pred[:, i, 1] * jnp.sin(last_pose[:, 2])
-#         y_pred_y = y_pred[:, i, 0] * jnp.sin(last_pose[:, 2]) + y_pred[:, i, 1] * jnp.cos(last_pose[:, 2])
-#         y_pred = y_pred.at[:, i, 0].set(y_pred_x)
-#         y_pred = y_pred.at[:, i, 1].set(y_pred_y)
-#         # accumulate the poses
-#         y_pred = y_pred.at[:, i, :6].add(last_pose)
-#         y_pred = y_pred.at[:, i, 2].set(align_yaw_jax(y_pred[:, i, 2], 0.0))
-#         last_pose = y_pred[:, i, :6]
-#     return y_pred
-
-# def val_episode(var_collect, episode_num, rngs, dateset):
-#     episode = dateset.get_episode(episode_num)
-#     episode = jnp.array(torch.unsqueeze(episode, 0).numpy())
-#     batch = episode[:, :, :-1]
-#     history, action, y, action_padding_mask = dateset[episode_num:episode_num+1]
-#     history = jnp.array(history.numpy())
-#     action = jnp.array(action.numpy())
-#     y = jnp.array(y.numpy())
-#     action_padding_mask = jnp.array(action_padding_mask.numpy())
-#     predicted_states = apply_batch(var_collect, batch[:, history_length-1, :], history, action, y, action_padding_mask, rngs)
-#     return np.array(predicted_states)
-
-# def visualize_episode(epoch_num: int, episode_num, val_dataset, rngs):
-#     val_collect = model.init(init_rngs, jax_history_input, jax_prediction_input, jax_history_mask, jax_prediction_mask)
-#     orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-#     raw_restored = orbax_checkpointer.restore(os.path.join(save_model_folder_path, f"{epoch_num}", "default"))
-#     # import ipdb; ipdb.set_trace()
-#     val_collect['params'] = raw_restored['model']['params']
-#     predicted_states = val_episode(val_collect, episode_num, rngs, val_dataset)
-#     episode = val_dataset.get_episode(episode_num)
-
-#     fig, axs = plt.subplots(2, 2, figsize=(10, 10))
-#     axs[0, 0].plot(episode[:, 0], episode[:, 1], label='Ground Truth', marker='o', markersize=5)
-#     axs[0, 0].plot(predicted_states[0, :, 0], predicted_states[0, :, 1], label='Predicted', marker='x', markersize=5)
-#     axs[0, 0].legend()
-#     axs[0, 0].axis('equal')
-
-#     predict_x = np.arange(0, predicted_states.shape[1]) + episode.shape[0] - predicted_states.shape[1]
-#     axs[0, 1].plot(episode[:, 3], label='Ground Truth vx')
-#     axs[0, 1].plot(episode[:, 4], label='Ground Truth vy')
-#     axs[0, 1].plot(predict_x, predicted_states[0, :, 3], label='Predicted vx')
-#     axs[0, 1].plot(predict_x, predicted_states[0, :, 4], label='Predicted vy')
-#     axs[0, 1].legend()
-
-#     axs[1, 1].plot(episode[:, 5], label='Ground Truth v_yaw')
-#     axs[1, 1].plot(predict_x, predicted_states[0, :, 5], label='Predicted v_yaw')
-#     axs[1, 1].legend()
-
-#     fig.tight_layout()
-#     fig.savefig('episode.png')
-#     plt.close(fig)
-#     wandb.log({"episode": wandb.Image('episode.png')})
-
 train_losses = []
 val_losses = []
 val_epoch_nums = []
-
-# for epoch in range(num_epochs):
-#     running_loss = 0.0
-#     t = tqdm.tqdm(train_loader)
-
-#     running_loss /= len(train_loader)
-#     train_losses.append(running_loss)
-#     wandb.log({"train_loss": running_loss, "learning_rate": learning_rate_fn(global_state.step)})
-#     print(save_model_folder_path)
-#     # import ipdb; ipdb.set_trace()
-#     ckpt = {'model': global_state, 'input_mean': input_mean, 'input_std': input_std}
-#     save_args = orbax_utils.save_args_from_target(ckpt)
-#     checkpoint_manager.save(epoch+1, ckpt, save_kwargs={'save_args': save_args})
-
-    # if (epoch + 1) % val_every == 0:
-    #     visualize_episode(epoch + 1, 1, val_dataset, global_rngs)
-    #     val_loss = val_loop(global_state, global_var, val_loader, global_rngs)
-    #     val_losses.append(val_loss)
-    #     val_epoch_nums.append(epoch + 1)
-    #     print(f'Validation Loss: {val_loss:.4f}')
-    #     wandb.log({"val_loss": val_loss})
-
-    # if (epoch+1) % num_epochs == 0:
-    #     temp_use_verify_data()
-
 # loss function for torch
 def loss_fn(model, history, action, y, action_padding_mask):
     if architecture == "torch_decoder":
@@ -329,29 +241,8 @@ for epoch in track(range(num_epochs)):
         loss.backward()
         optimizer.step()  
 
-        train_loss += loss
+        train_loss += loss.detach().item()
 
-    # if (epoch + 1) % val_every == 0:
-    #     model.eval()
-    #     with torch.no_grad():
-    #         test_loss = 0.
-    #         if test_loader is not None:
-    #             for inputs, targets in test_loader:
-    #                 inputs = inputs.to(device)
-    #                 targets = targets.to(device)
-    #                 outputs = model.predict(inputs)
-    #                 # test_loss += criterion(outputs, targets).item()
-    #                 test_loss = torch.mean((outputs - targets) ** 2, dim=0) + test_loss
-                
-    #                 test_loss /= len(test_loader)
-            
-    #         train_loss = 0.
-    #         for inputs, targets in train_loader:
-    #             inputs = inputs.to(device)
-    #             targets = targets.to(device)
-    #             outputs = model(inputs)
-    #             train_loss += criterion(outputs, targets).item()
-    #         train_loss /= len(train_loader)
         if (epoch + 1) % val_every == 0:
             train_loss /= len(train_loader)
             train_losses.append(train_loss)
