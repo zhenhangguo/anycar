@@ -18,7 +18,8 @@ import torch.optim as optim
 Save_Fig = True
 
 # model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-11T19:25:14.129-model_checkpoint"
+# model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-11T19:25:14.129-model_checkpoint"
+model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-20T19:50:30.419-model_checkpoint"
 dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'  #10 pkl
 # dataset_path = '/disk1/collect_data_from_anycar/check_data/verify_bag_data_0310'  #10 pkl
 
@@ -80,41 +81,44 @@ def align_yaw_torch(yaw_1, yaw_2):
     return d_yaw_aligned + yaw_2
 
 def apply_batch_torch(model, last_state, history, action, y, input_mean, input_std):
-    history = history.to(device)
-    y = y.to(device)
+    with torch.no_grad(): 
+        history = history.to(device)
+        y = y.to(device)
 
-    if use_torch_decoder:
-        history[:, :, :6] = (history[:, :, :6] - input_mean) / input_std
-    else:
-        history = (history[:, :, :6] - input_mean) / input_std
-    y[:, :, :6] = (y[:, :, :6] - input_mean) / input_std
+        if use_torch_decoder:
+            history[:, :, :6] = (history[:, :, :6] - input_mean) / input_std
+        else:
+            history = (history[:, :, :6] - input_mean) / input_std
+        y[:, :, :6] = (y[:, :, :6] - input_mean) / input_std
 
-    x = history[:, 1:, :]
-    x = x.to(device)
-    action = action.to(device)
+        x = history[:, 1:, :]
+        x = x.to(device)
+        action = action.to(device)
 
-    y_pred = model(x, action) * input_std + input_mean
-    last_pose = last_state[:, :6].to(device)
-    for i in range(y_pred.shape[1]):
-        # rotate dx, dy back to world frame
-        y_pred_x = y_pred[:, i, 0] * torch.cos(last_pose[:, 2]) - y_pred[:, i, 1] * torch.sin(last_pose[:, 2])
-        y_pred_y = y_pred[:, i, 0] * torch.sin(last_pose[:, 2]) + y_pred[:, i, 1] * torch.cos(last_pose[:, 2])
-        y_pred[:, i, 0] = y_pred_x
-        y_pred[:, i, 1] = y_pred_y
-        # accumulate the poses
-        y_pred[:, i, :6] += last_pose
-        y_pred[:, i, 2] = align_yaw_torch(y_pred[:, i, 2], 0.0)
-        last_pose = y_pred[:, i, :6]
-    return y_pred
+        y_pred = model(x, action) * input_std + input_mean
+        last_pose = last_state[:, :6].to(device)
+        for i in range(y_pred.shape[1]):
+            # rotate dx, dy back to world frame
+            y_pred_x = y_pred[:, i, 0] * torch.cos(last_pose[:, 2]) - y_pred[:, i, 1] * torch.sin(last_pose[:, 2])
+            y_pred_y = y_pred[:, i, 0] * torch.sin(last_pose[:, 2]) + y_pred[:, i, 1] * torch.cos(last_pose[:, 2])
+            y_pred[:, i, 0] = y_pred_x
+            y_pred[:, i, 1] = y_pred_y
+            # accumulate the poses
+            y_pred[:, i, :6] += last_pose
+            y_pred[:, i, 2] = align_yaw_torch(y_pred[:, i, 2], 0.0)
+            last_pose = y_pred[:, i, :6]
+
+        return y_pred
 
 def val_episode(model, episode_num):
-    episode = test_dataset.get_episode(episode_num)
-    episode = torch.unsqueeze(episode, 0)
-    batch = episode[:, :, :-1]
-    history, action, y, action_padding_mask = test_dataset[episode_num:episode_num+1]
-    predicted_states = apply_batch_torch(model, batch[:, history_length-1, :], history, action, y, input_mean, input_std)
-    predicted_states = predicted_states.cpu().detach().numpy()
-    return np.array(predicted_states)
+    with torch.no_grad():
+        episode = test_dataset.get_episode(episode_num)
+        episode = torch.unsqueeze(episode, 0)
+        batch = episode[:, :, :-1]
+        history, action, y, action_padding_mask = test_dataset[episode_num:episode_num+1]
+        predicted_states = apply_batch_torch(model, batch[:, history_length-1, :], history, action, y, input_mean, input_std)
+        predicted_states = predicted_states.cpu().detach().numpy()
+        return np.array(predicted_states)
 
 # plot final result
 def plot_final_result(data_num, rmse_dict):

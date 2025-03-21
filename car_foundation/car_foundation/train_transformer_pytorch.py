@@ -52,7 +52,7 @@ load_checkpoint = False
 resume_model_checkpint = 0
 resume_model_name = ""
 
-val_every = 50
+val_every = 20
 batch_size = 512
 lambda_l2 = 1e-4
 #dataset_path = 'DATASET-PATH'
@@ -60,7 +60,7 @@ dataset_path = '/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_ze
 # dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'
 # check_data_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
 check_data_path = '/disk1/collect_data_from_anycar/New_demo/check_data_with_offset'
-comment = 'jax'
+comment = 'torch'
 
 # Device to use
 device = torch.device("cuda")
@@ -77,35 +77,17 @@ num_heads = 4
 num_layers = 3 #2
 dropout = 0.1
 
-# state_dim = 6
-# action_dim = 2
-# latent_dim = 64
-# num_heads = 4
-# num_layers = 2
-# dropout = 0.1
-
 save_model_folder_prefix = datetime.datetime.now().isoformat(timespec='milliseconds')
 save_model_folder_path = os.path.join(CAR_FOUNDATION_MODEL_DIR, f'{save_model_folder_prefix}-model_checkpoint')
 
-# architecture = 'decoder'
-# architecture = 'mlp'
-# architecture = 'cnn'
-# architecture = 'torch'
 architecture = 'torch_decoder'
+use_torch_decoder = True
 
-if architecture == 'decoder':
-    model = JaxTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, dropout, history_length - 1, prediction_length, jnp.bfloat16, name=architecture)
-elif architecture == 'mlp':
-    model = JaxMLP([256, 256, 256, 256, 256], state_dim, 0.1, name=architecture)
-elif architecture == 'cnn':
-    model = JaxCNN([32, 64, 128, 256], state_dim, 0.1, name=architecture)
-elif architecture == 'torch':
-    model = TorchTransformer(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, dropout)
-elif architecture == "torch_decoder":
+if architecture == "torch_decoder":
     model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout).to(device) 
 
 # Load the dataset
-binary_mask = False # type(model) == TorchGPT2
+binary_mask = False
 dataset_files = glob.glob(os.path.join(dataset_path, '*.pkl')) # get all *.pkl file in this path
 random.shuffle(dataset_files)
 total_len = len(dataset_files)
@@ -116,7 +98,6 @@ data_20 = dataset_files[split_70:split_20]
 data_10 = dataset_files[split_20:]
 
 train_dataset = MujocoDataset(data_70, history_length, prediction_length, delays=delays, teacher_forcing=teacher_forcing, binary_mask=binary_mask,attack=ATTACK, use_zero_point=USE_ZERO_POINT)
-# import ipdb; ipdb.set_trace()
 print("train data length", len(train_dataset))
 
 val_dataset = MujocoDataset(data_20, history_length, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK, use_zero_point=USE_ZERO_POINT)
@@ -167,6 +148,99 @@ wandb.init(
 print(wandb.config)
 print(f"total params: {sum(p.numel() for p in model.parameters())}")
 
+def align_yaw_torch(yaw_1, yaw_2):
+    d_yaw = yaw_1 - yaw_2
+    d_yaw_aligned = torch.atan2(torch.sin(d_yaw), torch.cos(d_yaw))
+    return d_yaw_aligned + yaw_2
+
+def apply_batch_torch(model, last_state, history, action, y, input_mean, input_std):
+    with torch.no_grad(): 
+        history = history.to(device)
+        y = y.to(device)
+
+        if use_torch_decoder:
+            history[:, :, :6] = (history[:, :, :6] - input_mean) / input_std
+        else:
+            history = (history[:, :, :6] - input_mean) / input_std
+        y[:, :, :6] = (y[:, :, :6] - input_mean) / input_std
+
+        x = history[:, 1:, :]
+        x = x.to(device)
+        action = action.to(device)
+
+        y_pred = model(x, action) * input_std + input_mean
+        last_pose = last_state[:, :6].to(device)
+        for i in range(y_pred.shape[1]):
+            # rotate dx, dy back to world frame
+            y_pred_x = y_pred[:, i, 0] * torch.cos(last_pose[:, 2]) - y_pred[:, i, 1] * torch.sin(last_pose[:, 2])
+            y_pred_y = y_pred[:, i, 0] * torch.sin(last_pose[:, 2]) + y_pred[:, i, 1] * torch.cos(last_pose[:, 2])
+            y_pred[:, i, 0] = y_pred_x
+            y_pred[:, i, 1] = y_pred_y
+            # accumulate the poses
+            y_pred[:, i, :6] += last_pose
+            y_pred[:, i, 2] = align_yaw_torch(y_pred[:, i, 2], 0.0)
+            last_pose = y_pred[:, i, :6]
+
+        return y_pred
+def val_episode(model, episode_num, dateset):
+    episode = dateset.get_episode(episode_num)
+    episode = torch.unsqueeze(episode, 0)
+    batch = episode[:, :, :-1]
+    history, action, y, action_padding_mask = dateset[episode_num:episode_num+1]
+    predicted_states = apply_batch_torch(model, batch[:, history_length-1, :], history, action, y, input_mean, input_std)
+    return np.array(predicted_states.cpu())
+
+def val_loop(model_path, val_loader):
+
+    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout)
+    model = model.to(device)
+    model.load_state_dict(torch.load(model_path)['model_state_dict'])
+    model.eval()
+
+    val_loss = 0.0
+    t_val = tqdm.tqdm(val_loader)
+    for i, (history, action, y, action_padding_mask) in enumerate(t_val):
+        history = history.to(device)
+        action = action.to(device)
+        y = y.to(device)
+        action_padding_mask = action_padding_mask.to(device)
+        val_loss += loss_fn(model, history, action, y, action_padding_mask).detach().item()
+        t_val.set_description(f'Validation Loss: {(val_loss / (i + 1)):.4f}')
+        t_val.refresh()
+    val_loss /= len(val_loader)
+    return val_loss
+def visualize_episode(episode_num, val_dataset, model_path):
+    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout)
+    model = model.to(device)
+    model.load_state_dict(torch.load(model_path)['model_state_dict'])
+    model.eval()
+
+    with torch.no_grad():
+        predicted_states = val_episode(model, episode_num, val_dataset)
+        episode = val_dataset.get_episode(episode_num)
+
+    fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+    axs[0, 0].plot(episode[:, 0], episode[:, 1], label='Ground Truth', marker='o', markersize=5)
+    axs[0, 0].plot(predicted_states[0, :, 0], predicted_states[0, :, 1], label='Predicted', marker='x', markersize=5)
+    axs[0, 0].legend()
+    axs[0, 0].axis('equal')
+
+    predict_x = np.arange(0, predicted_states.shape[1]) + episode.shape[0] - predicted_states.shape[1]
+    axs[0, 1].plot(episode[:, 3], label='Ground Truth vx')
+    axs[0, 1].plot(episode[:, 4], label='Ground Truth vy')
+    axs[0, 1].plot(predict_x, predicted_states[0, :, 3], label='Predicted vx')
+    axs[0, 1].plot(predict_x, predicted_states[0, :, 4], label='Predicted vy')
+    axs[0, 1].legend()
+
+    axs[1, 1].plot(episode[:, 5], label='Ground Truth v_yaw')
+    axs[1, 1].plot(predict_x, predicted_states[0, :, 5], label='Predicted v_yaw')
+    axs[1, 1].legend()
+
+    fig.tight_layout()
+    fig.savefig('episode.png')
+    plt.close(fig)
+    wandb.log({"episode": wandb.Image('episode.png')})
+
 def create_learning_rate_fn():
     warmup_fn = optax.linear_schedule(init_value=0.0, end_value=lr_begin, transition_steps=warmup_period)
     decay_fn = optax.exponential_decay(lr_begin, decay_rate=0.99, transition_steps=num_steps_per_epoch, staircase=True)
@@ -186,7 +260,6 @@ input_std = torch.tensor(train_dataset.std, dtype=torch.float32)
 input_mean = input_mean.to(device)
 input_std = input_std.to(device)
 
-
 print("mean: ", input_mean.tolist())
 print("std: ", input_std.tolist())
 
@@ -204,7 +277,6 @@ def loss_fn(model, history, action, y, action_padding_mask):
     y = y.detach()
     action = action.detach()  
 
-    # print(f"原始 action 的维度: {action.shape}")
     y_pred = model(history, action, history_padding_mask=None, action_padding_mask=action_padding_mask)
     action_padding_mask_binary = (action_padding_mask == 0)[:, :, None]    
     # add different state weights
@@ -243,6 +315,9 @@ for epoch in track(range(num_epochs)):
 
         train_loss += loss.detach().item()
 
+        t.set_description(f'Epoch {epoch + 1}, Loss: {(train_loss / (i + 1)):.4f}, LR: {learning_rate_fn(global_step):.6f}')
+        t.refresh()
+
         if (epoch + 1) % val_every == 0:
             train_loss /= len(train_loader)
             train_losses.append(train_loss)
@@ -259,49 +334,32 @@ for epoch in track(range(num_epochs)):
                 'epoch': epoch
             }
 
-            torch.save(checkpoint, save_model_folder_path)
+            save_model_folder_path_epoch = os.path.join(save_model_folder_path, f"{epoch + 1}", f"torch_model_{epoch + 1}")
+            os.makedirs(os.path.dirname(save_model_folder_path_epoch), exist_ok=True)
+            torch.save(checkpoint, save_model_folder_path_epoch)
 
+            visualize_episode(1, val_dataset, save_model_folder_path_epoch)
+            val_loss = val_loop(save_model_folder_path_epoch, val_loader)
+            val_losses.append(val_loss)
+            val_epoch_nums.append(epoch + 1)
+            print(f'Validation Loss: {val_loss:.4f}')
+            wandb.log({"val_loss": val_loss})
 
-    #     val_losses.append(test_loss)
+        optimizer.zero_grad(set_to_none=True)
+        loss.detach_()
+
     train_loss /= len(train_loader)
     train_losses.append(train_loss)
     log_dict = {"train_loss": train_loss}
-    # log_dict.update({f"test_loss_{i}": test_loss[i] for i in range(test_loss.shape[0])})
+    wandb.log({"train_loss": train_loss, "learning_rate": learning_rate_fn(global_step)})
     print("train_loss = " + str(train_loss))
-    # print(f"Epoch {epoch}, Validation Loss: {valid_loss}")
 
-torch.save(model.state_dict(), save_model_folder_path)
-
-checkpoint = {
-    'model_state_dict': model.state_dict(),
-    'optimizer_state_dict': optimizer.state_dict(),
-    'batch_size': batch_size,
-    'num_epochs': num_epochs,
-    'train_losses': train_losses,
-    'val_losses': val_losses,
-    'input_mean': input_mean,
-    'input_std': input_std,
-    'epoch': epoch
-}
-
-torch.save(checkpoint, save_model_folder_path)
-
-train_epoch_nums = list(range(1, num_epochs + 1))
+train_epoch_nums = list(range(1, len(train_losses) + 1))
 plt.figure()
-train_losses_np = [loss.cpu().detach().numpy() for loss in train_losses]
-plt.plot(train_epoch_nums, train_losses_np, label='Train Loss')
+plt.plot(train_epoch_nums, train_losses, label='Train Loss')
 plt.plot(val_epoch_nums, val_losses, label='Val Loss')
 plt.legend()
 plt.savefig('train_val_loss.png')
-# # plt.show()
-
-# # model.eval()
-# visualize_episode(epoch + 1, 1, val_dataset, global_rngs)
-# test_loss = val_loop(global_state, global_var, test_loader, global_rngs)
-# print(f'Test Loss: {test_loss:.4f}')
-
-# # Save the model
-# # torch.save(model.state_dict(), 'model.pth')
-# wandb.save('model_checkpoint/')
+# plt.show()
 
 wandb.finish()
