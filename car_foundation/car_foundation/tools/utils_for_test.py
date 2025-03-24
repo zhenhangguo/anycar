@@ -279,7 +279,6 @@ class MujocoDataset(Dataset):
             ## actions
             self.history[:, :, 6] += torch.rand_like(self.history[:, :, 6]) * 0.05 - 0.025
             self.history[:, :, 7] += torch.rand_like(self.history[:, :, 7]) * 0.05 - 0.025
-        
 
 
         # expand the dataset for teacher forcing

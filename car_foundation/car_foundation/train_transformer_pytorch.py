@@ -19,6 +19,8 @@ import time
 import math
 import random
 import tqdm
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import wandb
@@ -58,6 +60,7 @@ lambda_l2 = 1e-4
 #dataset_path = 'DATASET-PATH'
 dataset_path = '/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1'
 # dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'
+# dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-14T16:39:46.443-nuplan-dynamic-model-base'
 # check_data_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
 check_data_path = '/disk1/collect_data_from_anycar/New_demo/check_data_with_offset'
 comment = 'torch'
@@ -299,7 +302,7 @@ for epoch in track(range(num_epochs)):
         action = action.to(device)
         y = y.to(device)
         action_padding_mask = action_padding_mask.to(device)
-        optimizer.zero_grad(set_to_none=True)
+        # optimizer.zero_grad(set_to_none=True)
 
         # 更新学习率
         global_step = epoch * len(train_loader) + i 
@@ -318,35 +321,35 @@ for epoch in track(range(num_epochs)):
         t.set_description(f'Epoch {epoch + 1}, Loss: {(train_loss / (i + 1)):.4f}, LR: {learning_rate_fn(global_step):.6f}')
         t.refresh()
 
-        if (epoch + 1) % val_every == 0:
-            train_loss /= len(train_loader)
-            train_losses.append(train_loss)
-
-            checkpoint = {
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'batch_size': batch_size,
-                'num_epochs': num_epochs,
-                'train_losses': train_losses,
-                'val_losses': val_losses,
-                'input_mean': input_mean,
-                'input_std': input_std,
-                'epoch': epoch
-            }
-
-            save_model_folder_path_epoch = os.path.join(save_model_folder_path, f"{epoch + 1}", f"torch_model_{epoch + 1}")
-            os.makedirs(os.path.dirname(save_model_folder_path_epoch), exist_ok=True)
-            torch.save(checkpoint, save_model_folder_path_epoch)
-
-            visualize_episode(1, val_dataset, save_model_folder_path_epoch)
-            val_loss = val_loop(save_model_folder_path_epoch, val_loader)
-            val_losses.append(val_loss)
-            val_epoch_nums.append(epoch + 1)
-            print(f'Validation Loss: {val_loss:.4f}')
-            wandb.log({"val_loss": val_loss})
-
         optimizer.zero_grad(set_to_none=True)
         loss.detach_()
+
+    if (epoch + 1) % val_every == 0:
+        train_loss /= len(train_loader)
+        train_losses.append(train_loss)
+
+        checkpoint = {
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'batch_size': batch_size,
+            'num_epochs': num_epochs,
+            'train_losses': train_losses,
+            'val_losses': val_losses,
+            'input_mean': input_mean,
+            'input_std': input_std,
+            'epoch': epoch
+        }
+
+        save_model_folder_path_epoch = os.path.join(save_model_folder_path, f"{epoch + 1}", f"torch_model_{epoch + 1}")
+        os.makedirs(os.path.dirname(save_model_folder_path_epoch), exist_ok=True)
+        torch.save(checkpoint, save_model_folder_path_epoch)
+
+        visualize_episode(1, val_dataset, save_model_folder_path_epoch)
+        val_loss = val_loop(save_model_folder_path_epoch, val_loader)
+        val_losses.append(val_loss)
+        val_epoch_nums.append(epoch + 1)
+        print(f'Validation Loss: {val_loss:.4f}')
+        wandb.log({"val_loss": val_loss})
 
     train_loss /= len(train_loader)
     train_losses.append(train_loss)
