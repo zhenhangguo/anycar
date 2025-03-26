@@ -121,7 +121,7 @@ class LearnedPositionalEncoding(nn.Module):
 
 class TorchTransformerDecoder(nn.Module):
     def __init__(self, state_dim, action_dim, output_dim, latent_dim, num_heads, 
-                num_layers, device, dropout=0.1, history_length=250, prediction_length=50, compressed_history_length = 50):
+                num_layers, device, dropout=0.1, history_length=250, prediction_length=50, compressed_history_length = 42):
         super().__init__()
         # 初始化维度参数
         self.device = device
@@ -132,7 +132,6 @@ class TorchTransformerDecoder(nn.Module):
         self.history_length = history_length
         self.prediction_length = prediction_length
         self.compressed_history_length = compressed_history_length
-        self.stride = self.history_length // self.compressed_history_length
 
         self.embedding = nn.ModuleDict({
             'state': nn.Linear(state_dim, latent_dim),
@@ -140,24 +139,20 @@ class TorchTransformerDecoder(nn.Module):
             'output': nn.Linear(latent_dim, output_dim)
         }).to(device)
 
-        # 新增历史状态压缩器
-        self.history_state_compressor = nn.LSTM(
-            input_size=latent_dim,
-            hidden_size=latent_dim,
-            num_layers=1,
-            batch_first=True,
-            bidirectional=False
-        ).to(device)
+        # compress output size = 42
+        self.compressor = nn.ModuleDict({
+            'state': nn.Sequential(
+                nn.Conv1d(latent_dim, latent_dim, kernel_size=5, stride=3, padding=2),
+                nn.ReLU(),
+                nn.Conv1d(latent_dim, latent_dim, kernel_size=3, stride=2, padding=1),
+            ),
+            'action': nn.Sequential(
+                nn.Conv1d(latent_dim, latent_dim, kernel_size=5, stride=3, padding=1),
+                nn.ReLU(),
+                nn.Conv1d(latent_dim, latent_dim, kernel_size=3, stride=2, padding=1),
+            )
+        })
 
-        # 历史动作压缩器
-        self.history_action_compressor = nn.LSTM(
-            input_size=latent_dim,
-            hidden_size=latent_dim,
-            num_layers=1,
-            batch_first=True,
-            bidirectional=False
-        ).to(device)
-        
         self.register_buffer('tgt_mask', 
                            nn.Transformer.generate_square_subsequent_mask(prediction_length).to(device))
         
@@ -186,13 +181,12 @@ class TorchTransformerDecoder(nn.Module):
         """向量化的历史序列构建"""
         state_emb = self.embedding['state'](history[..., :self.state_dim])
         action_emb = self.embedding['action'](history[..., self.state_dim:])
-        compress_state_emb_seq, _ = self.history_state_compressor(state_emb)
-        compress_action_emb_seq, _ = self.history_action_compressor(action_emb)
 
-        compress_state_emb = compress_state_emb_seq[:,::self.stride, :]
-        compress_action_emb = compress_action_emb_seq[:,::self.stride, :]
+        # 卷积压缩
+        state_compressed = self.compressor['state'](state_emb.transpose(1,2)).transpose(1,2)
+        action_compressed = self.compressor['action'](action_emb.transpose(1,2)).transpose(1,2)
 
-        interleaved = torch.stack([compress_state_emb, compress_action_emb], dim=2)
+        interleaved = torch.stack([state_compressed, action_compressed], dim=2)
         interleaved = interleaved.view(interleaved.size(0), -1, interleaved.size(-1))
         return interleaved[:, :-1, :]
 
