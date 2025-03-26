@@ -142,16 +142,16 @@ class TorchTransformerDecoder(nn.Module):
 
         # 新增历史状态压缩器
         self.history_state_compressor = nn.LSTM(
-            input_size=state_dim,
+            input_size=latent_dim,
             hidden_size=latent_dim,
             num_layers=1,
             batch_first=True,
             bidirectional=False
         ).to(device)
 
-        # 新增历史动作压缩器
+        # 历史动作压缩器
         self.history_action_compressor = nn.LSTM(
-            input_size=action_dim,
+            input_size=latent_dim,
             hidden_size=latent_dim,
             num_layers=1,
             batch_first=True,
@@ -184,11 +184,10 @@ class TorchTransformerDecoder(nn.Module):
 
     def _build_history_emb(self, history: torch.Tensor) -> torch.Tensor:
         """向量化的历史序列构建"""
-        # state_emb = self.embedding['state'](history[..., :self.state_dim])
-        # action_emb = self.embedding['action'](history[..., self.state_dim:])
-        # 经过LSTM网络直接输出嵌入后的结果
-        compress_state_emb_seq, _ = self.history_state_compressor(history[..., :self.state_dim])
-        compress_action_emb_seq, _ = self.history_action_compressor(history[..., self.state_dim:]) 
+        state_emb = self.embedding['state'](history[..., :self.state_dim])
+        action_emb = self.embedding['action'](history[..., self.state_dim:])
+        compress_state_emb_seq, _ = self.history_state_compressor(state_emb)
+        compress_action_emb_seq, _ = self.history_action_compressor(action_emb)
 
         compress_state_emb = compress_state_emb_seq[:,::self.stride, :]
         compress_action_emb = compress_action_emb_seq[:,::self.stride, :]
