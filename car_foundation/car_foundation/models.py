@@ -142,14 +142,14 @@ class TorchTransformerDecoder(nn.Module):
         # compress output size = 42
         self.compressor = nn.ModuleDict({
             'state': nn.Sequential(
-                nn.Conv1d(latent_dim, latent_dim, kernel_size=5, stride=3, padding=2),
+                nn.Conv1d(state_dim, state_dim, kernel_size=5, stride=3, padding=2),
                 nn.ReLU(),
-                nn.Conv1d(latent_dim, latent_dim, kernel_size=3, stride=2, padding=1),
+                nn.Conv1d(state_dim, state_dim, kernel_size=3, stride=2, padding=1),
             ),
             'action': nn.Sequential(
-                nn.Conv1d(latent_dim, latent_dim, kernel_size=5, stride=3, padding=1),
+                nn.Conv1d(action_dim, action_dim, kernel_size=5, stride=3, padding=1),
                 nn.ReLU(),
-                nn.Conv1d(latent_dim, latent_dim, kernel_size=3, stride=2, padding=1),
+                nn.Conv1d(action_dim, action_dim, kernel_size=3, stride=2, padding=1),
             )
         })
 
@@ -179,29 +179,30 @@ class TorchTransformerDecoder(nn.Module):
 
     def _build_history_emb(self, history: torch.Tensor) -> torch.Tensor:
         """向量化的历史序列构建"""
-        state_emb = self.embedding['state'](history[..., :self.state_dim])
-        action_emb = self.embedding['action'](history[..., self.state_dim:])
+        state = history[..., :self.state_dim].transpose(1, 2)
+        action = history[..., self.state_dim:].transpose(1, 2)
 
-        # 卷积压缩
-        state_compressed = self.compressor['state'](state_emb.transpose(1,2)).transpose(1,2)
-        action_compressed = self.compressor['action'](action_emb.transpose(1,2)).transpose(1,2)
+        state_compressed = self.compressor['state'](state).transpose(1, 2)
+        action_compressed = self.compressor['action'](action).transpose(1, 2)
+        state_emb = self.embedding['state'](state_compressed)
+        action_emb = self.embedding['action'](action_compressed)
 
-        interleaved = torch.stack([state_compressed, action_compressed], dim=2)
+        interleaved = torch.stack([state_emb, action_emb], dim=2)
         interleaved = interleaved.view(interleaved.size(0), -1, interleaved.size(-1))
         return interleaved[:, :-1, :]
 
     def forward(self, history, action, history_padding_mask=None, action_padding_mask=None):
-        history_emb = self._build_history_emb(history).to(self.device)
-        history_emb = self.position_encoding['history'](history_emb).to(self.device)
+        history_emb = self._build_history_emb(history)
+        history_emb = self.position_encoding['history'](history_emb)
         
         action_emb = self.position_encoding['action'](
             self.embedding['action'](action)
-        ).to(self.device)
+        )
         
         out = self.transformer_decoder(
             tgt=action_emb,
             memory=history_emb,
-            tgt_mask=self.tgt_mask.to(self.device),
+            tgt_mask=self.tgt_mask,
             tgt_key_padding_mask=action_padding_mask.to(self.device) if action_padding_mask is not None else None,
             memory_key_padding_mask=history_padding_mask.to(self.device) if history_padding_mask is not None else None,
         )
