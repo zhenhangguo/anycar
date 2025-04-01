@@ -39,7 +39,8 @@ torch.manual_seed(3407)
 np.random.seed(3407)
 random.seed(3407)
 
-history_length = 251
+history_length = 250
+
 prediction_length = 50
 delays = None
 teacher_forcing = False
@@ -47,18 +48,26 @@ teacher_forcing = False
 ATTACK = False
 USE_ZERO_POINT= True
 
-lr_begin = 5e-4
-warmup_period = 500
-num_epochs = 400
-load_checkpoint = False
-resume_model_checkpint = 0
-resume_model_name = ""
+FINE_TUNE = True
+
+if FINE_TUNE:
+    lr_begin = 5e-4
+    warmup_period = 2
+    num_epochs = 400
+    load_checkpoint = True
+    resume_model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/test_compress_file/torch_model_240_use_cnn_before_emb"
+else:
+    lr_begin = 5e-4
+    warmup_period = 500
+    num_epochs = 400
+    load_checkpoint = False
 
 val_every = 20
 batch_size = 512
 lambda_l2 = 1e-4
-#dataset_path = 'DATASET-PATH'
-dataset_path = '/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1'
+dataset_path = '/disk1/collect_data_from_anycar/data_from_bag/new_temp_data/pkg_file'
+
+# dataset_path = '/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1'
 # dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'
 # dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-14T16:39:46.443-nuplan-dynamic-model-base'
 # check_data_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
@@ -68,8 +77,6 @@ comment = 'torch'
 # Device to use
 device = torch.device("cuda")
 assert device.type == "cuda", "Only cuda is supported"
-
-resume_model_folder_path = os.path.join(CAR_FOUNDATION_MODEL_DIR, resume_model_name, f"{resume_model_checkpint}")
 
 num_workers = 6
 
@@ -100,11 +107,11 @@ data_70 = dataset_files[:split_70]
 data_20 = dataset_files[split_70:split_20]
 data_10 = dataset_files[split_20:]
 
-train_dataset = MujocoDataset(data_70, history_length, prediction_length, delays=delays, teacher_forcing=teacher_forcing, binary_mask=binary_mask,attack=ATTACK, use_zero_point=USE_ZERO_POINT)
+train_dataset = MujocoDataset(data_70, history_length+1, prediction_length, delays=delays, teacher_forcing=teacher_forcing, binary_mask=binary_mask,attack=ATTACK, use_zero_point=USE_ZERO_POINT)
 print("train data length", len(train_dataset))
 
-val_dataset = MujocoDataset(data_20, history_length, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK, use_zero_point=USE_ZERO_POINT)
-test_dataset = MujocoDataset(data_10, history_length, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK, use_zero_point=USE_ZERO_POINT)
+val_dataset = MujocoDataset(data_20, history_length+1, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK, use_zero_point=USE_ZERO_POINT)
+test_dataset = MujocoDataset(data_10, history_length+1, prediction_length, delays=delays, mean=train_dataset.mean, teacher_forcing=teacher_forcing, std=train_dataset.std, binary_mask=binary_mask, attack=ATTACK, use_zero_point=USE_ZERO_POINT)
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
@@ -143,8 +150,6 @@ wandb.init(
         "implementation": "torch",
         "model_path": save_model_folder_path,
         "resume": load_checkpoint,
-        "resume_checkpoint_path": resume_model_folder_path,
-        "resume_checkpoint": resume_model_checkpint,
         "attack": ATTACK,
     }
 )
@@ -194,8 +199,7 @@ def val_episode(model, episode_num, dateset):
     return np.array(predicted_states.cpu())
 
 def val_loop(model_path, val_loader):
-
-    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout)
+    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout).to(device)
     model = model.to(device)
     model.load_state_dict(torch.load(model_path)['model_state_dict'])
     model.eval()
@@ -213,7 +217,7 @@ def val_loop(model_path, val_loader):
     val_loss /= len(val_loader)
     return val_loss
 def visualize_episode(episode_num, val_dataset, model_path):
-    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout)
+    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout).to(device)
     model = model.to(device)
     model.load_state_dict(torch.load(model_path)['model_state_dict'])
     model.eval()
@@ -255,14 +259,19 @@ def create_learning_rate_fn():
 
 learning_rate_fn = create_learning_rate_fn()
 
-model.to(device)
-optimizer = optim.AdamW(model.parameters(), lr=lr_begin, weight_decay=lambda_l2)
+if FINE_TUNE:
+    model.load_state_dict(torch.load(resume_model_path)['model_state_dict'])
+    input_mean = torch.load(resume_model_path)['input_mean']
+    input_std = torch.load(resume_model_path)['input_std']
+else:
+    input_mean = torch.tensor(train_dataset.mean, dtype=torch.float32)
+    input_std = torch.tensor(train_dataset.std, dtype=torch.float32)
 
-input_mean = torch.tensor(train_dataset.mean, dtype=torch.float32)
-input_std = torch.tensor(train_dataset.std, dtype=torch.float32)
 input_mean = input_mean.to(device)
 input_std = input_std.to(device)
 
+model.to(device)
+optimizer = optim.AdamW(model.parameters(), lr=lr_begin, weight_decay=lambda_l2)
 print("mean: ", input_mean.tolist())
 print("std: ", input_std.tolist())
 
@@ -302,7 +311,6 @@ for epoch in track(range(num_epochs)):
         action = action.to(device)
         y = y.to(device)
         action_padding_mask = action_padding_mask.to(device)
-        # optimizer.zero_grad(set_to_none=True)
 
         # 更新学习率
         global_step = epoch * len(train_loader) + i 
@@ -325,8 +333,6 @@ for epoch in track(range(num_epochs)):
         loss.detach_()
 
     if (epoch + 1) % val_every == 0:
-        train_loss /= len(train_loader)
-        train_losses.append(train_loss)
 
         checkpoint = {
             'model_state_dict': model.state_dict(),

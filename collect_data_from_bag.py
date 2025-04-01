@@ -18,6 +18,7 @@ from google.protobuf.pyext._message import RepeatedCompositeContainer
 from scipy.interpolate import interp1d
 import datetime
 from generate_data_utils import *
+from verify_utils import *
 import pickle
 
 logger = logging.getLogger(__name__)
@@ -433,10 +434,6 @@ auto_mode_flag_topic = "/vehicle/dbw_reports:superpilot_enabled"
 # Vehicle_Name = "pde_a1"
 Vehicle_Name = "debug"
 
-# temp use params
-steer_ratio = 25
-Use_Front_Wheel_Angle = False
-
 # every pkl data step length
 num_size = 2000
 
@@ -453,12 +450,14 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     
-    if Vehicle_Name == "pde_a1":
-        file_save_path = "/disk/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pde-a1"
-    if Vehicle_Name == "pdb_c11":
-        file_save_path = "/disk/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pdb-c11"
-    if Vehicle_Name == "debug":
-        file_save_path = "/disk/collect_data_from_anycar/check_data/verify_bag_data_0310"
+    # if Vehicle_Name == "pde_a1":
+    #     file_save_path = "/disk/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pde-a1"
+    # if Vehicle_Name == "pdb_c11":
+    #     file_save_path = "/disk/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pdb-c11"
+    # if Vehicle_Name == "debug":
+    #     file_save_path = "/disk/collect_data_from_anycar/check_data/verify_bag_data_0310"
+
+    file_save_path = "/disk/collect_data_from_anycar/data_from_bag/new_temp_data/pkg_file"
 
     os.makedirs(file_save_path, exist_ok=True)
     
@@ -479,7 +478,12 @@ if __name__ == '__main__':
 
     for file_name in args.input:
         bag_reader = BagReader(file_name)
-        bag_reader.read_bag(args)
+        try:
+            bag_reader.read_bag(args)
+        except Exception as e:
+            print("Error reading bag: {}".format(file_name))
+            print(e)
+            continue
 
         data = BagDataAnalyzer(bag_reader.bag_timestamps, bag_reader.extracted_data)
 
@@ -491,15 +495,11 @@ if __name__ == '__main__':
                 if key == "steer":
                     print("this data size = " + str(len(value)))
 
-            # if use steer rate as input
-            if Use_Front_Wheel_Angle:
-                total_dataset["steer"] = np.array(total_dataset["steer"] ) / steer_ratio
-
             idx = 0
 
             dataset = CarDataset()
 
-            for i in range(-(-len(total_dataset["xpos_x"]) // num_size)):
+            for i in range(math.floor((len(total_dataset["xpos_x"]) // num_size))):
 
                 # add need tag
                 actual_size = min(num_size, len(total_dataset["xpos_x"]) - idx * num_size)
@@ -517,7 +517,7 @@ if __name__ == '__main__':
                 dataset.data_logs["lap_end"] = [0] * actual_size
                 dataset.data_logs["lap_end"][-1] = 1
                 now = datetime.datetime.now().isoformat(timespec='milliseconds')
-                file_name_save = "bag_data_" + str(i) + "_" +str(now) + ".pkl"
+                file_name_save = "bag_data_"  +str(now) + "_" + str(i) + ".pkl"
                 file_savepath = os.path.join(file_save_path, file_name_save)
 
                 for key, value in dataset.data_logs.items():
@@ -533,3 +533,6 @@ if __name__ == '__main__':
 
             # if args.to_csv:
             #     bag_reader.to_csv(args.output)
+
+    clear_unfit_pkl_file(file_save_path)
+    print("transform bag to pkl data finish")

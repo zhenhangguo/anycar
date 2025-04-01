@@ -10,6 +10,7 @@ from car_foundation.utils import align_yaw_jax
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pickle
+import math
 from torch.utils.data import DataLoader
 
 
@@ -195,10 +196,16 @@ def clear_unfit_pkl_file(dataset_path):
     # set data feature bound and remove this pkl file
     max_vx_speed = 30
     min_vx_speed = 5
+
+    key_list = ["steer", "xpos_x", "xpos_y", "xpos_z", "xori_x", "xori_y", "xori_z", "xori_w", "avel_z", "xacc_x", "xacc_y", "xacc_z", "throttle", "xvel_x"]
     
     for file_path, data in file_data_pairs:
         if (max(data.data_logs["xvel_x"]) > max_vx_speed) or (min(data.data_logs["xvel_x"]) < min_vx_speed):
             os.remove(file_path)
+        for key in key_list:
+            if np.any(np.isnan(data.data_logs[key])):
+                os.remove(file_path)
+                break
 
 def calculate_dataset_md5(dataset):
     """
