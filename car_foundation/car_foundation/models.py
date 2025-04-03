@@ -139,10 +139,10 @@ class TorchTransformerDecoder(nn.Module):
             'output': nn.Linear(latent_dim, output_dim)
         }).to(device)
 
-        # compress output size = 42
+        # compress output size = 250->42
         self.compressor = nn.ModuleDict({
             'state': nn.Sequential(
-                nn.Conv1d(state_dim, state_dim, kernel_size=5, stride=3, padding=2),
+                nn.Conv1d(state_dim, state_dim, kernel_size=5, stride=3, padding=2),   # if history input is 125, padding should be 1 to keep the same size with action
                 nn.ReLU(),
                 nn.Conv1d(state_dim, state_dim, kernel_size=3, stride=2, padding=1),
             ),

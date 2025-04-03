@@ -40,15 +40,25 @@ np.random.seed(3407)
 random.seed(3407)
 
 history_length = 250
+actual_input_length = 42
 
 prediction_length = 50
 delays = None
 teacher_forcing = False
 
+# 降采样
+Compress_Sample = False
+compress_history_length = 125
+compress_ratio = compress_history_length / history_length
+# 时序降采样
+# unique_indexs = np.arange(0, history_length -1 , math.ceil(1 / compress_ratio))
+# 缩短时序
+unique_indexs = np.arange(history_length- compress_history_length, history_length, 1)
+
 ATTACK = False
 USE_ZERO_POINT= True
 
-FINE_TUNE = True
+FINE_TUNE = False
 
 if FINE_TUNE:
     lr_begin = 5e-4
@@ -65,9 +75,9 @@ else:
 val_every = 20
 batch_size = 512
 lambda_l2 = 1e-4
-dataset_path = '/disk1/collect_data_from_anycar/data_from_bag/new_temp_data/pkg_file'
+# dataset_path = '/disk1/collect_data_from_anycar/data_from_bag/new_temp_data/pkg_file'
 
-# dataset_path = '/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1'
+dataset_path = '/disk1/collect_data_from_anycar/New_demo/new_data_with_x_mean_zero/total_data_1'
 # dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/temp_debug_data'
 # dataset_path = '/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-01-14T16:39:46.443-nuplan-dynamic-model-base'
 # check_data_path = '/disk1/collect_data_from_anycar/temp_verify_backlash_model/2025-01-14T18:15:29.673-nuplan-dynamic-model-verify'
@@ -94,7 +104,11 @@ architecture = 'torch_decoder'
 use_torch_decoder = True
 
 if architecture == "torch_decoder":
-    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout).to(device) 
+    if Compress_Sample:
+        actual_input_length = int(actual_input_length * compress_ratio)
+        model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout, compress_history_length, prediction_length, actual_input_length).to(device) 
+    else:
+        model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout).to(device) 
 
 # Load the dataset
 binary_mask = False
@@ -173,6 +187,10 @@ def apply_batch_torch(model, last_state, history, action, y, input_mean, input_s
         y[:, :, :6] = (y[:, :, :6] - input_mean) / input_std
 
         x = history[:, 1:, :]
+
+        if Compress_Sample:
+            x = x[:, unique_indexs, :]
+
         x = x.to(device)
         action = action.to(device)
 
@@ -199,7 +217,10 @@ def val_episode(model, episode_num, dateset):
     return np.array(predicted_states.cpu())
 
 def val_loop(model_path, val_loader):
-    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout).to(device)
+    if Compress_Sample:
+        model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout, compress_history_length, prediction_length, actual_input_length)
+    else:
+        model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout)
     model = model.to(device)
     model.load_state_dict(torch.load(model_path)['model_state_dict'])
     model.eval()
@@ -217,7 +238,10 @@ def val_loop(model_path, val_loader):
     val_loss /= len(val_loader)
     return val_loss
 def visualize_episode(episode_num, val_dataset, model_path):
-    model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout).to(device)
+    if Compress_Sample:
+        model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout, compress_history_length, prediction_length, actual_input_length)
+    else:
+        model = TorchTransformerDecoder(state_dim, action_dim, state_dim, latent_dim, num_heads, num_layers, device, dropout) 
     model = model.to(device)
     model.load_state_dict(torch.load(model_path)['model_state_dict'])
     model.eval()
@@ -288,6 +312,9 @@ def loss_fn(model, history, action, y, action_padding_mask):
     history = history[:, 1:, :].detach()  
     y = y.detach()
     action = action.detach()  
+
+    if Compress_Sample:
+        history = history[:, unique_indexs, :]
 
     y_pred = model(history, action, history_padding_mask=None, action_padding_mask=action_padding_mask)
     action_padding_mask_binary = (action_padding_mask == 0)[:, :, None]    
