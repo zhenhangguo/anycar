@@ -125,6 +125,14 @@ class CarDataset:
                         "traj_y": [],
                         "lap_end":[],
                         "vehicle_yaw": [],
+                        "ref_trajectory": [],
+                        "planning_ff_cmd": [],
+                        "error_state_1": [],
+                        "error_state_2": [],
+                        "error_state_3": [],
+                        "error_state_4": [],
+                        "error_state_5": [],
+                        "error_state_6": [],
                         }   
         
     def __len__(self):

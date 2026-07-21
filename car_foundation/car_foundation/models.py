@@ -145,12 +145,12 @@ class TorchTransformerDecoder(nn.Module):
                 nn.Conv1d(state_dim, state_dim, kernel_size=5, stride=3, padding=2),   # if history input is 125, padding should be 1 to keep the same size with action
                 nn.ReLU(),
                 nn.Conv1d(state_dim, state_dim, kernel_size=3, stride=2, padding=1),
-            ),
+            ).to(device),
             'action': nn.Sequential(
                 nn.Conv1d(action_dim, action_dim, kernel_size=5, stride=3, padding=1),
                 nn.ReLU(),
                 nn.Conv1d(action_dim, action_dim, kernel_size=3, stride=2, padding=1),
-            )
+            ).to(device)
         })
 
         self.register_buffer('tgt_mask', 
@@ -176,24 +176,41 @@ class TorchTransformerDecoder(nn.Module):
         ).to(device)
 
         self.register_buffer('dummy', torch.tensor(0, device=device), persistent=False)
+        self.to(device)
 
     def _build_history_emb(self, history: torch.Tensor) -> torch.Tensor:
         """向量化的历史序列构建"""
-        state = history[..., :self.state_dim].transpose(1, 2)
-        action = history[..., self.state_dim:].transpose(1, 2)
+        if history.device != self.device:
+            history = history.to(self.device, non_blocking=True)
 
-        state_compressed = self.compressor['state'](state).transpose(1, 2)
-        action_compressed = self.compressor['action'](action).transpose(1, 2)
-        state_emb = self.embedding['state'](state_compressed)
-        action_emb = self.embedding['action'](action_compressed)
+        # 优化内存布局，减少transpose操作
+        batch_size = history.size(0)
+        state = history[..., :self.state_dim].permute(0, 2, 1).contiguous()
+        action = history[..., self.state_dim:].permute(0, 2, 1).contiguous()
 
-        interleaved = torch.stack([state_emb, action_emb], dim=2)
-        interleaved = interleaved.view(interleaved.size(0), -1, interleaved.size(-1))
-        return interleaved[:, :-1, :]
+        with torch.cuda.stream(torch.cuda.current_stream()):  # 使用单独的CUDA流
+
+            # 直接在GPU上进行卷积计算
+            state_compressed = self.compressor['state'](state.cuda())
+            action_compressed = self.compressor['action'](action.cuda())
+        
+            # 优化内存布局转换
+            state_emb = self.embedding['state'](state_compressed.transpose(1, 2))
+            action_emb = self.embedding['action'](action_compressed.transpose(1, 2))
+
+            interleaved = torch.stack([state_emb, action_emb], dim=2)
+            interleaved = interleaved.view(interleaved.size(0), -1, interleaved.size(-1))
+            return interleaved[:, :-1, :]
 
     def forward(self, history, action, history_padding_mask=None, action_padding_mask=None):
-        history_emb = self._build_history_emb(history)
-        history_emb = self.position_encoding['history'](history_emb)
+        if not self.training:  
+            history_first_batch = history[0:1,:,:].contiguous()
+            history_emb_first_batch = self._build_history_emb(history_first_batch)
+            history_emb_first_batch  = self.position_encoding['history'](history_emb_first_batch)
+            history_emb = history_emb_first_batch.repeat(history.size(0), 1, 1)
+        else:
+            history_emb = self._build_history_emb(history)
+            history_emb = self.position_encoding['history'](history_emb)
         
         action_emb = self.position_encoding['action'](
             self.embedding['action'](action)
@@ -205,6 +222,248 @@ class TorchTransformerDecoder(nn.Module):
             tgt_mask=self.tgt_mask,
             tgt_key_padding_mask=action_padding_mask.to(self.device) if action_padding_mask is not None else None,
             memory_key_padding_mask=history_padding_mask.to(self.device) if history_padding_mask is not None else None,
+        )
+        return self.embedding['output'](out)
+
+class TorchTransformerDecoderCurrentState(TorchTransformerDecoder):
+    def __init__(self, state_dim, action_dim, output_dim, latent_dim, num_heads,
+                num_layers, device, dropout=0.1, history_length=250, prediction_length=50,
+                compressed_history_length=42, current_dim=None):
+        super().__init__(
+            state_dim,
+            action_dim,
+            output_dim,
+            latent_dim,
+            num_heads,
+            num_layers,
+            device,
+            dropout,
+            history_length,
+            prediction_length,
+            compressed_history_length,
+        )
+        self.current_dim = current_dim if current_dim is not None else state_dim + action_dim
+        self.action_fusion = nn.Linear(action_dim + self.current_dim, latent_dim).to(device)
+
+    def init_fusion_from_action_embedding(self):
+        with torch.no_grad():
+            self.action_fusion.weight.zero_()
+            self.action_fusion.bias.copy_(self.embedding['action'].bias)
+            self.action_fusion.weight[:, :self.action_dim].copy_(self.embedding['action'].weight)
+
+    def _build_action_emb(self, history, action, current_state=None):
+        if current_state is None:
+            current_state = history[:, -1, :self.current_dim]
+        current_state = current_state.to(action.device)
+        current = current_state[:, None, :].expand(-1, action.shape[1], -1)
+        return self.action_fusion(torch.cat([action, current], dim=-1))
+
+    def forward(self, history, action, current_state=None, history_padding_mask=None, action_padding_mask=None):
+        if not self.training:
+            history_first_batch = history[0:1, :, :].contiguous()
+            history_emb_first_batch = self._build_history_emb(history_first_batch)
+            history_emb_first_batch = self.position_encoding['history'](history_emb_first_batch)
+            history_emb = history_emb_first_batch.repeat(history.size(0), 1, 1)
+        else:
+            history_emb = self._build_history_emb(history)
+            history_emb = self.position_encoding['history'](history_emb)
+
+        action_emb = self.position_encoding['action'](
+            self._build_action_emb(history, action, current_state)
+        )
+
+        out = self.transformer_decoder(
+            tgt=action_emb,
+            memory=history_emb,
+            tgt_mask=self.tgt_mask,
+            tgt_key_padding_mask=action_padding_mask.to(self.device) if action_padding_mask is not None else None,
+            memory_key_padding_mask=history_padding_mask.to(self.device) if history_padding_mask is not None else None,
+        )
+        return self.embedding['output'](out)
+
+class TorchTransformerDecoderCurrentStateMLP(TorchTransformerDecoderCurrentState):
+    def __init__(self, state_dim, action_dim, output_dim, latent_dim, num_heads,
+                num_layers, device, dropout=0.1, history_length=250, prediction_length=50,
+                compressed_history_length=42, current_dim=None, fusion_hidden_dim=128):
+        super().__init__(
+            state_dim,
+            action_dim,
+            output_dim,
+            latent_dim,
+            num_heads,
+            num_layers,
+            device,
+            dropout,
+            history_length,
+            prediction_length,
+            compressed_history_length,
+            current_dim,
+        )
+        self.fusion_hidden_dim = fusion_hidden_dim
+        self.action_fusion = nn.Sequential(
+            nn.Linear(action_dim + self.current_dim, fusion_hidden_dim),
+            nn.SiLU(),
+            nn.Linear(fusion_hidden_dim, latent_dim),
+        ).to(device)
+        self.init_fusion_from_action_embedding()
+
+    def init_fusion_from_action_embedding(self):
+        """Start as the baseline action embedding and learn a residual correction."""
+        with torch.no_grad():
+            nn.init.zeros_(self.action_fusion[-1].weight)
+            nn.init.zeros_(self.action_fusion[-1].bias)
+
+    def _build_action_emb(self, history, action, current_state=None):
+        if current_state is None:
+            current_state = history[:, -1, :self.current_dim]
+        current_state = current_state.to(action.device)
+        current = current_state[:, None, :].expand(-1, action.shape[1], -1)
+        fusion_input = torch.cat([action, current], dim=-1)
+        return self.embedding['action'](action) + self.action_fusion(fusion_input)
+
+
+class TorchTransformerDecoderKinematicQueryMLP(TorchTransformerDecoderCurrentStateMLP):
+    """Add a zero-initialized DyTR-style nominal kinematic query branch.
+
+    The existing action/current-state query remains unchanged.  Nominal future
+    states and transitions are fused through an additive MLP whose final layer
+    starts at zero, so loading a ``TorchTransformerDecoderCurrentStateMLP``
+    checkpoint preserves its predictions exactly at initialization.
+    """
+
+    def __init__(self, state_dim, action_dim, output_dim, latent_dim, num_heads,
+                 num_layers, device, dropout=0.1, history_length=250,
+                 prediction_length=50, compressed_history_length=42,
+                 current_dim=None, fusion_hidden_dim=128,
+                 nominal_state_dim=5, nominal_transition_dim=4,
+                 query_hidden_dim=128):
+        super().__init__(
+            state_dim,
+            action_dim,
+            output_dim,
+            latent_dim,
+            num_heads,
+            num_layers,
+            device,
+            dropout,
+            history_length,
+            prediction_length,
+            compressed_history_length,
+            current_dim,
+            fusion_hidden_dim,
+        )
+        self.nominal_state_dim = nominal_state_dim
+        self.nominal_transition_dim = nominal_transition_dim
+        self.query_hidden_dim = query_hidden_dim
+        query_input_dim = (
+            action_dim
+            + self.current_dim
+            + nominal_state_dim
+            + nominal_transition_dim
+        )
+        self.kinematic_query_fusion = nn.Sequential(
+            nn.Linear(query_input_dim, query_hidden_dim),
+            nn.SiLU(),
+            nn.Linear(query_hidden_dim, latent_dim),
+        ).to(device)
+        with torch.no_grad():
+            nn.init.zeros_(self.kinematic_query_fusion[-1].weight)
+            nn.init.zeros_(self.kinematic_query_fusion[-1].bias)
+
+    def _build_action_emb(
+        self,
+        history,
+        action,
+        current_state=None,
+        nominal_state=None,
+        nominal_transition=None,
+    ):
+        base_embedding = super()._build_action_emb(history, action, current_state)
+        if nominal_state is None and nominal_transition is None:
+            return base_embedding
+        if nominal_state is None or nominal_transition is None:
+            raise ValueError(
+                "nominal_state and nominal_transition must be provided together"
+            )
+        if nominal_state.shape[:-1] != action.shape[:-1]:
+            raise ValueError(
+                "nominal_state leading dimensions must match future action"
+            )
+        if nominal_transition.shape[:-1] != action.shape[:-1]:
+            raise ValueError(
+                "nominal_transition leading dimensions must match future action"
+            )
+        if nominal_state.shape[-1] != self.nominal_state_dim:
+            raise ValueError(
+                f"Expected nominal_state dim {self.nominal_state_dim}, "
+                f"got {nominal_state.shape[-1]}"
+            )
+        if nominal_transition.shape[-1] != self.nominal_transition_dim:
+            raise ValueError(
+                f"Expected nominal_transition dim {self.nominal_transition_dim}, "
+                f"got {nominal_transition.shape[-1]}"
+            )
+
+        if current_state is None:
+            current_state = history[:, -1, :self.current_dim]
+        current = current_state.to(action.device)[:, None, :].expand(
+            -1, action.shape[1], -1
+        )
+        query_input = torch.cat(
+            (
+                action,
+                current,
+                nominal_state.to(action.device),
+                nominal_transition.to(action.device),
+            ),
+            dim=-1,
+        )
+        return base_embedding + self.kinematic_query_fusion(query_input)
+
+    def forward(
+        self,
+        history,
+        action,
+        current_state=None,
+        nominal_state=None,
+        nominal_transition=None,
+        history_padding_mask=None,
+        action_padding_mask=None,
+    ):
+        if not self.training:
+            history_first_batch = history[0:1, :, :].contiguous()
+            history_emb_first_batch = self._build_history_emb(history_first_batch)
+            history_emb_first_batch = self.position_encoding['history'](
+                history_emb_first_batch
+            )
+            history_emb = history_emb_first_batch.repeat(history.size(0), 1, 1)
+        else:
+            history_emb = self._build_history_emb(history)
+            history_emb = self.position_encoding['history'](history_emb)
+
+        action_emb = self.position_encoding['action'](
+            self._build_action_emb(
+                history,
+                action,
+                current_state,
+                nominal_state,
+                nominal_transition,
+            )
+        )
+        out = self.transformer_decoder(
+            tgt=action_emb,
+            memory=history_emb,
+            tgt_mask=self.tgt_mask,
+            tgt_key_padding_mask=(
+                action_padding_mask.to(self.device)
+                if action_padding_mask is not None
+                else None
+            ),
+            memory_key_padding_mask=(
+                history_padding_mask.to(self.device)
+                if history_padding_mask is not None
+                else None
+            ),
         )
         return self.embedding['output'](out)
 

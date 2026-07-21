@@ -371,12 +371,16 @@ class BagDataAnalyzer:
         # if different topic timestamp is different, sync to the same
         # select data in auto model
         min_length = num_size
+        control_t_list, _  = self._parse_data_from_string(control_topic)
         auto_t_list, flag_list = self._parse_data_from_string(auto_mode_flag_topic)
+
+        interp_function = interp1d(auto_t_list , flag_list, kind='linear',fill_value='extrapolate')
+        auto_flag_list = interp_function(control_t_list)
         
         use_t_list = []
         use_t_list.append([])
         
-        for t, flag in zip(auto_t_list, flag_list):
+        for t, flag in zip(control_t_list, auto_flag_list):
             if flag == 1:
                 use_t_list[-1].append(t)
             else:
@@ -394,6 +398,7 @@ class BagDataAnalyzer:
             dataset = {}
             for key, value in topic_dict.items():
                 t_list, value_list = self._parse_data_from_string(value)
+                
 
                 if first_t_list != t_list:
                     interp_function = interp1d(t_list , value_list, kind='linear',fill_value='extrapolate')
@@ -404,6 +409,21 @@ class BagDataAnalyzer:
             dataset_total.append(dataset)
 
         return dataset_total
+
+def convert_trajectory_to_array(trajectory_point):
+    """将TrajectoryPoint转换为numpy数组"""
+    return np.array([
+        trajectory_point.x,
+        trajectory_point.y,
+        trajectory_point.control_input,
+        trajectory_point.relative_time_msec,
+        trajectory_point.yaw,
+        trajectory_point.yaw_rate,
+        trajectory_point.local_vx,
+        trajectory_point.local_vy,
+        trajectory_point.steer_wheel_angle,
+        trajectory_point.a_x_cmd
+    ])
 
 # need topic from bag
 NEED_TOPIC_BAG = {
@@ -425,13 +445,22 @@ NEED_TOPIC_BAG = {
 
     "throttle": "/vehicle/status:acc_fused",
     "xvel_x" : "/vehicle/status:v",
+
+    "ref_trajectory": "/vehicle/control_cmd:debug_cmd.mpc_info.mpc_reference_point",
+    "planning_ff_cmd": "/vehicle/control_cmd:debug_cmd.mpc_info.ff_planning_compensation",
+    "error_state_0": "/vehicle/control_cmd:debug_cmd.mpc_info.lateral_error_integral_cmd",
+    "error_state_1": "/vehicle/control_cmd:debug_cmd.steer_wheel_ratio",
+    "error_state_2": "/vehicle/control_cmd:debug_cmd.absolute_sight_angle",
+    "error_state_3": "/vehicle/control_cmd:debug_cmd.roll_rate_compensation",
+    "error_state_4": "/vehicle/control_cmd:debug_cmd.online_roll_gain",
+    "error_state_5": "/vehicle/control_cmd:debug_cmd.safety_barrier_compensation",
+    "error_state_6": "/vehicle/control_cmd:debug_cmd.avg_abs_yawrate_rate",
 }
 
 auto_mode_flag_topic = "/vehicle/dbw_reports:superpilot_enabled"
+control_topic = "/vehicle/control_cmd:debug_cmd.mpc_info.mpc_reference_point"
 
 # choose vehicle name for save data
-# Vehicle_Name = "pdb_c11"
-# Vehicle_Name = "pde_a1"
 Vehicle_Name = "debug"
 
 # every pkl data step length
@@ -449,16 +478,8 @@ if __name__ == '__main__':
     parser.add_argument('--to-csv', default=False, action='store_true', help="Whether to generate origin data csvfile")
 
     args = parser.parse_args()
-    
-    # if Vehicle_Name == "pde_a1":
-    #     file_save_path = "/disk/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pde-a1"
-    # if Vehicle_Name == "pdb_c11":
-    #     file_save_path = "/disk/collect_data_from_anycar/data_from_bag/data_use_steer_angle/pdb-c11"
-    # if Vehicle_Name == "debug":
-    #     file_save_path = "/disk/collect_data_from_anycar/check_data/verify_bag_data_0310"
 
-    # file_save_path = "/disk/collect_data_from_anycar/data_from_bag/new_temp_data/c2_bag_04_new"
-    file_save_path = '/disk/collect_data_from_anycar/data_from_bag/new_temp_data/c2_bag_04'
+    file_save_path = '/disk/collect_data_from_anycar/select_bag_for_verify_sample/data_files'
 
     os.makedirs(file_save_path, exist_ok=True)
     
@@ -493,7 +514,7 @@ if __name__ == '__main__':
         for total_dataset in total_dataset_list:
         
             for key, value in total_dataset.items():
-                if key == "steer":
+                if key == "ref_trajectory":
                     print("this data size = " + str(len(value)))
 
             idx = 0
@@ -506,7 +527,14 @@ if __name__ == '__main__':
                 actual_size = min(num_size, len(total_dataset["xpos_x"]) - idx * num_size)
                 dataset.data_logs["xvel_y"] = [0] * actual_size
                 for key, value in total_dataset.items():
-                    dataset.data_logs[key] = total_dataset[key][idx*num_size:idx*num_size+actual_size]
+                    if key == "ref_trajectory":
+                        value_list = []
+                        for trjactory in value:
+                            trjactory_value = [convert_trajectory_to_array(point) for point in trjactory]
+                            value_list.append(trjactory_value)
+                        dataset.data_logs[key] = value_list[idx*num_size:idx*num_size+actual_size]
+                    else:
+                        dataset.data_logs[key] = total_dataset[key][idx*num_size:idx*num_size+actual_size]
 
                 # check data is cover
                 # for key, value in dataset.data_logs.items():

@@ -1,4 +1,7 @@
-pth_model_path: 'car_foundation/car_foundation/tools/2025-03-11T19:25:14.129-model_checkpoint'
+
+#pth_model_path: 'car_foundation/car_foundation/tools/2025-03-11T19:25:14.129-model_checkpoint'
+#pth_model_path: 'car_foundation/car_foundation/tools/torch_model_400_improve_torch_transformer_projection'
+pth_model_path: 'install/car_foundation/lib/python3.10/site-packages/car_foundation/models/2025-04-25T19:07:01.713-model_checkpoint/40/torch_model_40'
 
 decoder_onnx_model_path: 'car_foundation/car_foundation/tools/verify_convert.onnx'
 
@@ -12,7 +15,7 @@ dropout:              0.1
 history_length:       250
 prediction_length:    50
 
-batch_size:           1
+batch_size:           512
 
 opset_version:        14
 

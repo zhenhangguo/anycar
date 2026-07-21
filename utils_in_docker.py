@@ -1,41 +1,41 @@
 import hashlib
-from jax.tree_util import tree_flatten
-import torch
+# from jax.tree_util import tree_flatten
+# import torch
 import os
 import glob
 
-import jax.numpy as jnp
+# import jax.numpy as jnp
 import numpy as np
-from car_foundation.utils import align_yaw_jax
+# from car_foundation.utils import align_yaw_jax
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pickle
 import math
-from torch.utils.data import DataLoader
+# from torch.utils.data import DataLoader
 
 
-def model_hash(params):
-    md5 = hashlib.md5()
-    flat_params, _ = tree_flatten(params)
-    for param in flat_params:
-        md5.update(jnp.array(param).tobytes())
-    return md5.hexdigest()
+# def model_hash(params):
+#     md5 = hashlib.md5()
+#     flat_params, _ = tree_flatten(params)
+#     for param in flat_params:
+#         md5.update(jnp.array(param).tobytes())
+#     return md5.hexdigest()
 
-def compute_1d_rmse(tensor1, tensor2):
-    assert tensor1.shape == tensor2.shape
-    mse = torch.mean((tensor1 - tensor2) ** 2)
-    rmse = torch.sqrt(mse).item()
-    return rmse
+# def compute_1d_rmse(tensor1, tensor2):
+#     assert tensor1.shape == tensor2.shape
+#     mse = torch.mean((tensor1 - tensor2) ** 2)
+#     rmse = torch.sqrt(mse).item()
+#     return rmse
 
-def compute_vertor_rmse(tensor1_x, tensor1_y, tensor2_x, tensor2_y):
-    assert tensor1_x.shape == tensor2_x.shape
-    assert tensor1_y.shape == tensor2_y.shape
-    x_error = tensor1_x - tensor2_x
-    y_error = tensor1_y - tensor2_y
-    position_error = x_error ** 2 + y_error **2
-    mse = torch.mean(position_error)
-    rmse = torch.sqrt(mse).item()
-    return rmse
+# def compute_vertor_rmse(tensor1_x, tensor1_y, tensor2_x, tensor2_y):
+#     assert tensor1_x.shape == tensor2_x.shape
+#     assert tensor1_y.shape == tensor2_y.shape
+#     x_error = tensor1_x - tensor2_x
+#     y_error = tensor1_y - tensor2_y
+#     position_error = x_error ** 2 + y_error **2
+#     mse = torch.mean(position_error)
+#     rmse = torch.sqrt(mse).item()
+#     return rmse
 
 def clear_directory(path):
     files = glob.glob(os.path.join(path, '*'))
@@ -46,25 +46,25 @@ def clear_directory(path):
         except Exception as e:
             print(f"无法删除 {f}: {e}")
 
-def apply_batch(var_collect, last_state, history, action, y, action_padding_mask, rngs, input_mean, input_std, model):
-    history = history.at[:, :, :6].set((history[:, :, :6] - input_mean) / input_std)
-    y = y.at[:, :, :6].set((y[:, :, :6] - input_mean) / input_std)
+# def apply_batch(var_collect, last_state, history, action, y, action_padding_mask, rngs, input_mean, input_std, model):
+#     history = history.at[:, :, :6].set((history[:, :, :6] - input_mean) / input_std)
+#     y = y.at[:, :, :6].set((y[:, :, :6] - input_mean) / input_std)
 
-    x = history[:, 1:, :]
-    # tgt_mask = nn.Transformer.generate_square_subsequent_mask(action.size(1), device=action.device)
-    y_pred = model.apply(var_collect, x, action, action_padding_mask=action_padding_mask, rngs=rngs, deterministic=True) * input_std + input_mean
-    last_pose = last_state[:, :6]
-    for i in range(y_pred.shape[1]):
-        # rotate dx, dy back to world frame
-        y_pred_x = y_pred[:, i, 0] * jnp.cos(last_pose[:, 2]) - y_pred[:, i, 1] * jnp.sin(last_pose[:, 2])
-        y_pred_y = y_pred[:, i, 0] * jnp.sin(last_pose[:, 2]) + y_pred[:, i, 1] * jnp.cos(last_pose[:, 2])
-        y_pred = y_pred.at[:, i, 0].set(y_pred_x)
-        y_pred = y_pred.at[:, i, 1].set(y_pred_y)
-        # accumulate the poses
-        y_pred = y_pred.at[:, i, :6].add(last_pose)
-        y_pred = y_pred.at[:, i, 2].set(align_yaw_jax(y_pred[:, i, 2], 0.0))
-        last_pose = y_pred[:, i, :6]
-    return y_pred
+#     x = history[:, 1:, :]
+#     # tgt_mask = nn.Transformer.generate_square_subsequent_mask(action.size(1), device=action.device)
+#     y_pred = model.apply(var_collect, x, action, action_padding_mask=action_padding_mask, rngs=rngs, deterministic=True) * input_std + input_mean
+#     last_pose = last_state[:, :6]
+#     for i in range(y_pred.shape[1]):
+#         # rotate dx, dy back to world frame
+#         y_pred_x = y_pred[:, i, 0] * jnp.cos(last_pose[:, 2]) - y_pred[:, i, 1] * jnp.sin(last_pose[:, 2])
+#         y_pred_y = y_pred[:, i, 0] * jnp.sin(last_pose[:, 2]) + y_pred[:, i, 1] * jnp.cos(last_pose[:, 2])
+#         y_pred = y_pred.at[:, i, 0].set(y_pred_x)
+#         y_pred = y_pred.at[:, i, 1].set(y_pred_y)
+#         # accumulate the poses
+#         y_pred = y_pred.at[:, i, :6].add(last_pose)
+#         y_pred = y_pred.at[:, i, 2].set(align_yaw_jax(y_pred[:, i, 2], 0.0))
+#         last_pose = y_pred[:, i, :6]
+#     return y_pred
 
 def show_picture(data_analysis_mean, data_analysis_std):
     _, axes = plt.subplots(7, 1, figsize=(6, 18))
@@ -243,8 +243,9 @@ def clear_unfit_pkl_file(dataset_path):
         q = np.array([data.data_logs["xori_w"],data.data_logs["xori_x"], data.data_logs["xori_y"], data.data_logs["xori_z"]]).T
         _, _, yaw = quaternion_to_euler(q)
         if np.max(np.abs(yaw[1:] - yaw[:-1])) > 0.017452007:
+            np.set_printoptions(threshold=np.inf)
             print("yaw jump")
-            print(yaw)
+            print(np.array(yaw))
             os.remove(file_path)
 
 def calculate_dataset_md5(dataset):

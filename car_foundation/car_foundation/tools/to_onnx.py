@@ -7,7 +7,7 @@ import math
 
 from car_foundation.models import TorchTransformerDecoder, TorchGPT2
 
-model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/test_compress_file/torch_model_400_use_cnn_before_emb_short_history_125"
+model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/test_compress_file/torch_model_400_use_cnn_before_emb_fine_tune_c2"
 # model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-02-10T10:20:21.689-model_checkpoint"
 # model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-20T16:56:16.174-model_checkpoint"
 # model_path = "/disk1/collect_data_from_anycar/Compare_pytorch_and_jax/2025-03-20T19:50:30.419-model_checkpoint"
@@ -30,7 +30,7 @@ dropout = 0.1
 history_length = 250
 actual_input_length = 42
 prediction_length = 50
-batch_size = 512
+batch_size = 128
 
 # 降采样
 Compress_Sample = False
@@ -60,7 +60,7 @@ prediction_input = torch.randn(batch_size, prediction_length, action_dim).to(dev
 prediction_mask = torch.ones(batch_size, prediction_length).to(device)
 
 # 导出模型到 ONNX 格式
-output_onnx_path = output_path + "torch_transformer_decoder_0403_fix_batch_size_512_short_history_input_125.onnx"
+output_onnx_path = output_path + "torch_transformer_test_compress_0513_fixed_batch_128_cnn.onnx"
 torch.onnx.export(
     model, 
     (history_input, prediction_input, history_mask, prediction_mask), 

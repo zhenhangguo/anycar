@@ -12,7 +12,6 @@ import orbax.checkpoint
 
 from car_foundation import CAR_FOUNDATION_DATA_DIR, CAR_FOUNDATION_MODEL_DIR
 from car_foundation.dataset import MujocoDataset
-from car_foundation.jax_models import JaxTransformerDecoder
 
 from verify_utils import *
 from generate_data_utils import *
@@ -39,16 +38,16 @@ USE_ZERO_POINT = True  # set zero points as trajectory first point
 Show_Picture = True
 
 # funciton_1 : clear data in pkl !!!!!
-# clear_unfit_pkl_file("/disk1/collect_data_from_anycar/2025-01-14T16:39:46.443-nuplan-dynamic-model")
+clear_unfit_pkl_file("/disk1/collect_data_from_anycar/data_from_bag/new_temp_data/c2_bag_04_new")
 
 # funciton_2 : plot data density
 # data_analysis_mean, data_analysis_std = get_dict_mean_and_std()
-dataset_files = glob.glob(os.path.join(dataset_path, '*.pkl')) # get all *.pkl file in this path
-test_dataset = MujocoDataset(dataset_files, history_length, prediction_length, delays=delays, teacher_forcing=teacher_forcing, binary_mask=binary_mask,attack=ATTACK, use_zero_point=USE_ZERO_POINT)
+# dataset_files = glob.glob(os.path.join(dataset_path, '*.pkl')) # get all *.pkl file in this path
+# test_dataset = MujocoDataset(dataset_files, history_length, prediction_length, delays=delays, teacher_forcing=teacher_forcing, binary_mask=binary_mask,attack=ATTACK, use_zero_point=USE_ZERO_POINT)
 # calculate_data_range(test_dataset, data_analysis_mean, data_analysis_std)
 # if Show_Picture:
 #     show_picture(data_analysis_mean, data_analysis_std)
 
 
-plot_data_density(test_dataset)
+# plot_data_density(test_dataset)
 

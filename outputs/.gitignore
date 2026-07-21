@@ -1,0 +1,8 @@
+*
+!.gitignore
+!figures/
+!figures/.gitkeep
+!checkpoints/
+!checkpoints/.gitkeep
+!model_test_result_fig/
+!model_test_result_fig/.gitkeep

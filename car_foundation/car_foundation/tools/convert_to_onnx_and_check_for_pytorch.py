@@ -13,7 +13,13 @@ import onnx
 import onnxruntime
 import tensorrt as trt
 import pycuda.driver as cuda
-import pycuda.autoinit
+
+import torch.profiler
+from torch.profiler import profile, record_function, ProfilerActivity
+
+
+from datetime import datetime
+import socket
 
 import torch
 from omegaconf import DictConfig, OmegaConf
@@ -31,6 +37,21 @@ from utils_for_test import *
 import onnx_graphsurgeon
 from polygraphy.backend.onnx import fold_constants
 
+def format_memory_size(bytes):
+    units = ["B", "KB", "MB", "GB"]
+    size = float(bytes)
+    unit_index = 0
+    while size >= 1024.0 and unit_index < len(units) - 1:
+        size /= 1024.0
+        unit_index += 1
+    return f"{size:.2f} {units[unit_index]}"
+
+def to_tensor(data, device):
+    if isinstance(data, torch.Tensor):
+        return data.to(device)
+    return torch.tensor(data, device=device)
+
+
 def to_numpy(tensor):
     if isinstance(tensor, np.ndarray):
         return tensor
@@ -40,9 +61,80 @@ def to_numpy(tensor):
         tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
     )
 
+def profile_pth(model, pth_input):
+    # warmup
+    print("\n=== Warmup Phase ===")
+    for _ in range(10):
+        _ = model(*pth_input)
+    torch.cuda.synchronize()
+
+    print("\n=== Starting Profiling ===")
+    # profile with PyTorch Profiler
+    now = datetime.now().strftime("%Y%m%dT%H%M%S")
+    worker_name = f"{socket.gethostname()}_{now}_{os.getpid()}"
+    dir_name = f"./log/pth_profile"
+    with profile(
+        activities=[
+            ProfilerActivity.CPU,
+            ProfilerActivity.CUDA,
+        ],
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+        with_flops=True,
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+            dir_name=dir_name, worker_name=worker_name
+        ),
+    ) as prof:
+        with record_function("model_inference"):
+            _ = model(*pth_input)
+
+    print("\n=== Overall Memory Usage ===")
+    print(
+        f"Current CUDA memory allocated: {format_memory_size(torch.cuda.memory_allocated())}"
+    )
+    print(
+        f"Max CUDA memory allocated: {format_memory_size(torch.cuda.max_memory_allocated())}"
+    )
+    print(
+        f"Current CUDA memory reserved: {format_memory_size(torch.cuda.memory_reserved())}"
+    )
+    print(
+        f"Max CUDA memory reserved: {format_memory_size(torch.cuda.max_memory_reserved())}"
+    )
+
+    print("\n=== Top 20 Most Time-Consuming Operations (CUDA) ===")
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+
+    # Export chrome trace for visualization
+    print("\n=== Profile Data Exported ===")
+    print(f"Trace saved to: {dir_name}, three ways to view it:")
+    print(f"1. update environment and run command: tensorboard --logdir={dir_name}")
+    print("2. install tensorboard extension in vscode and launch tensorboard")
+    print("3. Chrome tracing tool steps:")
+    print("   a. Open Chrome browser and navigate to chrome://tracing")
+    print("   b. Click 'Load' button in the top-left corner")
+    print("   c. Navigate to the saved trace file in the log directory")
+    print("   d. Important information to look for in the timeline:")
+    print("      - Red bars: indicate long-running operations that might be bottlenecks")
+    print("      - Purple sections: indicate CUDA operations")
+    print("      - Blue sections: indicate CPU operations")
+    print("      - Hover over any section to see detailed timing information")
+    print("   e. Analysis tips:")
+    print("      - Look for gaps between operations (potential synchronization issues)")
+    print("      - Check for overlapping CPU and GPU operations (good parallelization)")
+    print("      - Identify the longest running operations (bottlenecks)")
+    print("      - Compare kernel launch time vs execution time")
+    print("   f. Navigation shortcuts:")
+    print("      - WASD: Pan and zoom the timeline")
+    print("      - 1/2: Move between interesting regions")
+    print("      - ? key: Show all keyboard shortcuts")
+    print()
+
+
 def generate_decoder_inputs(cfg, dataset):
 
-    history_input, prediction_input, _, _ = dataset[0:1]
+    history_input, prediction_input, _, _ = dataset[0:cfg.batch_size]
 
     history_mask = torch.ones(cfg.batch_size, cfg.history_length * 2 - 1)
     prediction_mask = torch.ones(cfg.batch_size, cfg.prediction_length)
@@ -100,57 +192,60 @@ def convert_decoder_to_onnx(
         cfg, dataset
     )
 
-    input_names, output_names = get_decoder_inputs_outputs_names()
+    pth_decoder.to(cfg.device)     
 
-    # export the model
-    torch.onnx.export(
-        pth_decoder,
-        dummy_input_new,   #dummy_input,
-        onnx_model_path,
-        input_names=input_names,
-        output_names=output_names,
-        dynamic_axes={},
-        do_constant_folding=True,
-        opset_version=cfg.opset_version,
-        verbose=cfg.export_verbose,
-    )
-    print(f"ONNX decoder model saved to {onnx_model_path}")
+    profile_pth(pth_decoder, pth_inputs)
 
-    try:
-        decoder_onnx_model = onnx.load(onnx_model_path)
-        onnx.checker.check_model(decoder_onnx_model)
-    except onnx.checker.ValidationError as e:
-        raise RuntimeError(f"Invalid ONNX decoder model: {e}")
+    # input_names, output_names = get_decoder_inputs_outputs_names()
 
-    # fold constants
-    decoder_onnx_model = fold_constants(decoder_onnx_model)
-    onnx.save(decoder_onnx_model, onnx_model_path)
+    # # export the model
+    # torch.onnx.export(
+    #     pth_decoder,
+    #     dummy_input_new,   #dummy_input,
+    #     onnx_model_path,
+    #     input_names=input_names,
+    #     output_names=output_names,
+    #     dynamic_axes={},
+    #     do_constant_folding=True,
+    #     opset_version=cfg.opset_version,
+    #     verbose=cfg.export_verbose,
+    # )
+    # print(f"ONNX decoder model saved to {onnx_model_path}")
 
-    onnx_decoder = onnxruntime.InferenceSession(decoder_onnx_model.SerializeToString())
+    # try:
+    #     decoder_onnx_model = onnx.load(onnx_model_path)
+    #     onnx.checker.check_model(decoder_onnx_model)
+    # except onnx.checker.ValidationError as e:
+    #     raise RuntimeError(f"Invalid ONNX decoder model: {e}")
 
-    print("==== To test decoder outputs again with exported inputs")
-    test_decoder_outputs(
-        pth_decoder, onnx_decoder, pth_inputs, onnx_inputs, rtol=cfg.rtol, atol=cfg.atol
-    )
+    # # fold constants
+    # decoder_onnx_model = fold_constants(decoder_onnx_model)
+    # onnx.save(decoder_onnx_model, onnx_model_path)
 
-    trt_engine = convert_decoder_to_trt(cfg, onnx_model_path, trt_engine_path)
+    # onnx_decoder = onnxruntime.InferenceSession(decoder_onnx_model.SerializeToString())
 
-    print(
-        f"==== To test tensorrt decoder outputs"
-    )
-    _, pth_inputs, onnx_inputs,_ = generate_decoder_inputs(
-        cfg, dataset
-    )
-    test_decoder_trt_outputs(
-        pth_decoder,
-        trt_engine,
-        pth_inputs,
-        onnx_inputs,
-        output_names,
-        rtol=cfg.rtol,
-        atol=cfg.atol,
-    )
+    # print("==== To test decoder outputs again with exported inputs")
+    # test_decoder_outputs(
+    #     pth_decoder, onnx_decoder, pth_inputs, onnx_inputs, rtol=cfg.rtol, atol=cfg.atol
+    # )
 
+    # trt_engine = convert_decoder_to_trt(cfg, onnx_model_path, trt_engine_path)
+
+    # print(
+    #     f"==== To test tensorrt decoder outputs"
+    # )
+    # _, pth_inputs, onnx_inputs,_ = generate_decoder_inputs(
+    #     cfg, dataset
+    # )
+    # test_decoder_trt_outputs(
+    #     pth_decoder,
+    #     trt_engine,
+    #     pth_inputs,
+    #     onnx_inputs,
+    #     output_names,
+    #     rtol=cfg.rtol,
+    #     atol=cfg.atol,
+    # )
 
 def test_decoder_outputs(
     pth_decoder, onnx_decoder, pth_inputs, onnx_inputs, rtol, atol
@@ -480,7 +575,7 @@ def convert_to_onnx(cfg: DictConfig):
 
     # load data from
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    dataset_files = glob.glob(os.path.join(current_dir, '*.pkl')) # get all *.pkl file in this path
+    dataset_files = glob.glob(os.path.join('car_foundation/car_foundation/tools/test_data', '*.pkl')) # get all *.pkl file in this path
     dataset = MujocoDataset(dataset_files, cfg.history_length, cfg.prediction_length, use_zero_point=True)
 
     OmegaConf.register_new_resolver("eval", eval)

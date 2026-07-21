@@ -258,6 +258,7 @@ AMENT_IGNORE
 
 # Local History for Visual Studio Code
 .history/
+.github/
 
 # Built Visual Studio Code Extensions
 *.vsix
@@ -274,8 +275,24 @@ rosbag2_*/
 
 jit_*
 
-data/
+data/*
+!data/protos/
+!data/protos/**
 wandb/
+outputs/**
+!outputs/.gitignore
+!outputs/figures/
+!outputs/figures/.gitkeep
+!outputs/checkpoints/
+!outputs/checkpoints/.gitkeep
+!outputs/model_test_result_fig/
+!outputs/model_test_result_fig/.gitkeep
+tmp/**
+!tmp/.gitignore
+model_test_result_fig/
+car_foundation/car_foundation/tools/test_data/
+car_foundation/car_foundation/tools/torch_model*
+sample_action_list.prototxt
 
 episode*.png
 inference_times.png

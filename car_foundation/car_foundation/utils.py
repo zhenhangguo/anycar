@@ -68,6 +68,9 @@ def quaternion_to_euler(q):
     cosy_cosp = 1 - 2 * (q_y**2 + q_z**2)
     yaw = np.arctan2(siny_cosp, cosy_cosp)
 
+    # avoid yaw list jump because of angle limit
+    yaw = np.unwrap(yaw, discont=np.pi)
+
     return roll, pitch, yaw
 
 def generate_subsequences(input_tensor):

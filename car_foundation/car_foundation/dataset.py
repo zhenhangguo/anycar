@@ -15,6 +15,7 @@ import tqdm
 import matplotlib.pyplot as plt
 import pickle
 import concurrent.futures
+import copy
 from transforms3d.euler import quat2euler
 
 from flax import linen as nn
@@ -188,9 +189,13 @@ class MujocoDataset(Dataset):
                  filter=False,
                  add_noise=False,
                  use_zero_point=False,
+                 with_ref_trajectory=False,
     ):
         self.attack = attack
         self.add_noise = add_noise
+        self.with_ref_trajectory = with_ref_trajectory
+        self.trajectory_data = None
+        self.current_state = None
         if delays is not None and any([d < 0 for d in delays]):
             raise ValueError('Delay should be greater than or equal to 0')
 
@@ -247,15 +252,31 @@ class MujocoDataset(Dataset):
 
             # use zero point as first point if need
             if use_zero_point:
+                first_column_list = []
                 for idx in range(data_array.shape[0]):
                     data = data_array[idx,:,:]
                     if np.isclose(data[0,0], 0, atol=1) and np.isclose(data[0,1], 0, atol=1):
                         continue
                     else:
-                        first_column = data[0, :2]
+                        first_column = copy.deepcopy(data[0, :2])
+                        first_column_list.append(first_column)
                         data[:, :2] -= first_column[np.newaxis, :]
 
-            return torch.tensor(data_array)
+            if with_ref_trajectory and "ref_trajectory" in mujoco_raw_dataset.data_logs:
+                trajectory_data = np.array(mujoco_raw_dataset.data_logs["ref_trajectory"])
+                trajectory_data = trajectory_data.reshape(-1, episode_length,trajectory_data.shape[1],trajectory_data.shape[2])
+                trajectory_data = trajectory_data[:, :(episode_length - episode_length % self.sequence_length), :, :].reshape(-1, self.sequence_length, trajectory_data.shape[2], trajectory_data.shape[3])
+
+                current_state = np.array([mujoco_raw_dataset.data_logs["steer"], mujoco_raw_dataset.data_logs["planning_ff_cmd"],mujoco_raw_dataset.data_logs["error_state_0"],mujoco_raw_dataset.data_logs["error_state_1"],mujoco_raw_dataset.data_logs["error_state_2"],mujoco_raw_dataset.data_logs["error_state_3"],mujoco_raw_dataset.data_logs["error_state_4"],mujoco_raw_dataset.data_logs["error_state_5"],mujoco_raw_dataset.data_logs["error_state_6"]]).T
+                current_state = current_state.reshape(-1, episode_length, current_state.shape[1])
+                current_state = current_state[:, :(episode_length - episode_length % self.sequence_length), :].reshape(-1, self.sequence_length, current_state.shape[2])
+
+                if use_zero_point:
+                    trajectory_data[:,:,:, :2] -= np.array(first_column_list)[:, np.newaxis,np.newaxis, :]
+
+                return torch.tensor(data_array), trajectory_data, current_state
+            else:
+                return torch.tensor(data_array)
 
         if type(path) == str:
             pickle_files = glob.glob(os.path.join(path, '*.pkl'))
@@ -279,6 +300,13 @@ class MujocoDataset(Dataset):
         else:
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 self.data = list(tqdm.tqdm(executor.map(load_pickle, pickle_files), total=len(pickle_files)))
+
+        if with_ref_trajectory and type(self.data[0]) == tuple:
+            self.trajectory_data = [item[1] for item in self.data]
+            self.trajectory_data = np.concatenate(self.trajectory_data, axis=0)
+            self.current_state = [item[2] for item in self.data]
+            self.current_state = np.concatenate(self.current_state, axis=0)
+            self.data = [item[0] for item in self.data]
 
         # concatenate all the episodes
         self.data = torch.concatenate(self.data, axis=0)
@@ -327,6 +355,8 @@ class MujocoDataset(Dataset):
         self.history = self.delta_data[:, :history_length, :8]
         self.action = self.delta_data[:, history_length-1:history_length+action_length-1, 6:8]
         self.y = self.delta_data[:, history_length:history_length+action_length, :6]
+        self.current_ref_trajectory = None if self.trajectory_data is None else self.trajectory_data[:, history_length-1:history_length, :, :]
+        self.current_state = None if self.current_state is None else self.current_state[:, history_length-1:history_length]
 
         # get the mean and std of the data
         if mean is not None:
@@ -414,3 +444,9 @@ class MujocoDataset(Dataset):
         self.action_padding_mask = self.action_padding_mask[mask]
 
         self.len = len(self.data)
+    
+    def get_current_frame_state(self, idx):
+        return self.current_ref_trajectory[idx]
+
+    def get_current_state(self, idx):
+        return self.current_state[idx]
